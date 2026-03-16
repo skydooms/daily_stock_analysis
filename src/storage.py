@@ -397,11 +397,21 @@ class DatabaseManager:
             config = get_config()
             db_url = config.get_db_url()
         
-        # 创建数据库引擎
+        # Create database engine with connection pool optimization
+        # Pool settings for better performance
+        pool_size = 5  # Number of connections to keep in pool
+        max_overflow = 10  # Max connections beyond pool_size
+        pool_timeout = 30  # Seconds to wait for available connection
+        pool_recycle = 3600  # Recycle connections after 1 hour
+        
         self._engine = create_engine(
             db_url,
-            echo=False,  # 设为 True 可查看 SQL 语句
-            pool_pre_ping=True,  # 连接健康检查
+            echo=False,  # Set to True to see SQL statements
+            pool_pre_ping=True,  # Connection health check
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
+            pool_recycle=pool_recycle,
         )
         
         # 创建 Session 工厂

@@ -79,7 +79,7 @@ class Config:
     # OpenAI 兼容 API（备选，当 Gemini/Anthropic 不可用时使用）
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None  # 如: https://api.openai.com/v1
-    openai_model: str = "gpt-4o-mini"  # OpenAI 兼容模型名称
+    openai_model: str = "glm-5"  # OpenAI 兼容模型名称（默认使用智谱 GLM-5）
     openai_vision_model: Optional[str] = None  # Vision 专用模型（可选，不配置则用 openai_model；部分模型如 DeepSeek 不支持图像）
     openai_temperature: float = 0.7  # OpenAI 温度参数（0.0-2.0，默认0.7）
     
