@@ -64,6 +64,12 @@
 git config --global http.proxy http://127.0.0.1:1087
 git config --global https.proxy http://127.0.0.1:1087
 
+# 配置邮箱（必须是你 GitHub 注册的邮箱）
+git config --global user.email "yonggedage@163.com"
+# 配置用户名（你的GitHub用户名/真实名字都可以）
+git config --global user.name "skydooms"
+
+git remote add upstream https://github.com/ZhuLinsen/daily_stock_analysis.git
 skills：
     针对触发买入的股票，进行详细的分析：
         1. 股票的价格、成交量、成交额等。

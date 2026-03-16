@@ -5,7 +5,7 @@ import { Card } from '../common';
 
 interface ReportDetailsProps {
   details?: ReportDetailsType;
-  queryId?: string;
+  recordId?: number;  // 分析历史记录主键 ID
 }
 
 /**
@@ -13,13 +13,13 @@ interface ReportDetailsProps {
  */
 export const ReportDetails: React.FC<ReportDetailsProps> = ({
   details,
-  queryId,
+  recordId,
 }) => {
   const [showRaw, setShowRaw] = useState(false);
   const [showSnapshot, setShowSnapshot] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  if (!details?.rawResult && !details?.contextSnapshot && !queryId) {
+  if (!details?.rawResult && !details?.contextSnapshot && !recordId) {
     return null;
   }
 
@@ -40,11 +40,11 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
         <button
           type="button"
           onClick={() => copyToClipboard(jsonStr)}
-          className="absolute top-2 right-2 text-xs text-muted hover:text-cyan transition-colors"
+          className="absolute top-2 right-2 text-xs text-muted-text hover:text-cyan transition-colors"
         >
           {copied ? 'Copied!' : 'Copy'}
         </button>
-        <pre className="text-xs text-secondary font-mono overflow-x-auto p-3 bg-base rounded-lg max-h-80 overflow-y-auto text-left w-0 min-w-full">
+        <pre className="text-xs text-secondary-text font-mono overflow-x-auto p-3 bg-base rounded-lg max-h-80 overflow-y-auto text-left w-0 min-w-full">
           {jsonStr}
         </pre>
       </div>
@@ -58,12 +58,12 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
         <h3 className="text-base font-semibold text-white mt-0.5">数据追溯</h3>
       </div>
 
-      {/* Query ID */}
-      {queryId && (
-        <div className="flex items-center gap-2 text-xs text-muted mb-3 pb-3 border-b border-white/5">
-          <span>Query ID:</span>
+      {/* Record ID */}
+      {recordId && (
+        <div className="flex items-center gap-2 text-xs text-muted-text mb-3 pb-3 border-b border-white/5">
+          <span>Record ID:</span>
           <code className="font-mono text-xs text-cyan bg-cyan/10 px-1.5 py-0.5 rounded">
-            {queryId}
+            {recordId}
           </code>
         </div>
       )}
@@ -80,7 +80,7 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             >
               <span className="text-xs text-white">原始分析结果</span>
               <svg
-                className={`w-3.5 h-3.5 text-muted transition-transform ${showRaw ? 'rotate-180' : ''}`}
+                className={`w-3.5 h-3.5 text-muted-text transition-transform ${showRaw ? 'rotate-180' : ''}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -106,7 +106,7 @@ export const ReportDetails: React.FC<ReportDetailsProps> = ({
             >
               <span className="text-xs text-white">分析快照</span>
               <svg
-                className={`w-3.5 h-3.5 text-muted transition-transform ${showSnapshot ? 'rotate-180' : ''}`}
+                className={`w-3.5 h-3.5 text-muted-text transition-transform ${showSnapshot ? 'rotate-180' : ''}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"

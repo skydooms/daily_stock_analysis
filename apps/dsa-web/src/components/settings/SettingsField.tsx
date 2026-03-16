@@ -1,8 +1,18 @@
 import { useState } from 'react';
 import type React from 'react';
-import { Select } from '../common';
-import type { ConfigValidationIssue, SystemConfigItem } from '../../types/systemConfig';
+import { EyeToggleIcon, Select } from '../common';
+import type { ConfigValidationIssue, SystemConfigFieldSchema, SystemConfigItem } from '../../types/systemConfig';
 import { getFieldDescriptionZh, getFieldTitleZh } from '../../utils/systemConfigI18n';
+
+function normalizeSelectOptions(options: SystemConfigFieldSchema['options'] = []) {
+  return options.map((option) => {
+    if (typeof option === 'string') {
+      return { value: option, label: option };
+    }
+
+    return option;
+  });
+}
 
 function isMultiValueField(item: SystemConfigItem): boolean {
   const validation = (item.schema?.validation ?? {}) as Record<string, unknown>;
@@ -37,6 +47,8 @@ function renderFieldControl(
   onChange: (nextValue: string) => void,
   isSecretVisible: boolean,
   onToggleSecretVisible: () => void,
+  isPasswordEditable: boolean,
+  onPasswordFocus: () => void,
 ) {
   const schema = item.schema;
   const commonClass = 'input-terminal';
@@ -59,7 +71,7 @@ function renderFieldControl(
         <Select
           value={value}
           onChange={onChange}
-          options={schema.options.map((option) => ({ value: option, label: option }))}
+          options={normalizeSelectOptions(schema.options)}
           disabled={disabled || !schema.isEditable}
           placeholder="请选择"
         />
@@ -76,7 +88,7 @@ function renderFieldControl(
           disabled={disabled || !schema?.isEditable}
           onChange={(event) => onChange(event.target.checked ? 'true' : 'false')}
         />
-        <span className="text-sm text-secondary">{checked ? '已启用' : '未启用'}</span>
+        <span className="text-sm text-secondary-text">{checked ? '已启用' : '未启用'}</span>
       </label>
     );
   }
@@ -91,6 +103,8 @@ function renderFieldControl(
             <div className="flex items-center gap-2" key={`${item.key}-${index}`}>
               <input
                 type={isSecretVisible ? 'text' : 'password'}
+                readOnly={!isPasswordEditable}
+                onFocus={onPasswordFocus}
                 className={`${commonClass} flex-1`}
                 value={entry}
                 disabled={disabled || !schema?.isEditable}
@@ -100,6 +114,16 @@ function renderFieldControl(
                   onChange(serializeMultiValues(nextValues));
                 }}
               />
+              <button
+                type="button"
+                className="btn-secondary !p-2"
+                disabled={disabled || !schema?.isEditable}
+                onClick={onToggleSecretVisible}
+                title={isSecretVisible ? '隐藏' : '显示'}
+                aria-label={isSecretVisible ? '隐藏密码' : '显示密码'}
+              >
+                <EyeToggleIcon visible={isSecretVisible} />
+              </button>
               <button
                 type="button"
                 className="btn-secondary !px-3 !py-2 text-xs"
@@ -123,14 +147,6 @@ function renderFieldControl(
             >
               添加 Key
             </button>
-            <button
-              type="button"
-              className="btn-secondary !px-3 !py-2 text-xs"
-              disabled={disabled || !schema?.isEditable}
-              onClick={onToggleSecretVisible}
-            >
-              {isSecretVisible ? '隐藏' : '显示'}
-            </button>
           </div>
         </div>
       );
@@ -140,6 +156,8 @@ function renderFieldControl(
       <div className="flex items-center gap-2">
         <input
           type={isSecretVisible ? 'text' : 'password'}
+          readOnly={!isPasswordEditable}
+          onFocus={onPasswordFocus}
           className={`${commonClass} flex-1`}
           value={value}
           disabled={disabled || !schema?.isEditable}
@@ -147,11 +165,13 @@ function renderFieldControl(
         />
         <button
           type="button"
-          className="btn-secondary !px-3 !py-2 text-xs"
+          className="btn-secondary !p-2"
           disabled={disabled || !schema?.isEditable}
           onClick={onToggleSecretVisible}
+          title={isSecretVisible ? '隐藏' : '显示'}
+          aria-label={isSecretVisible ? '隐藏密码' : '显示密码'}
         >
-          {isSecretVisible ? '隐藏' : '显示'}
+          <EyeToggleIcon visible={isSecretVisible} />
         </button>
       </div>
     );
@@ -183,6 +203,7 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
   const description = getFieldDescriptionZh(item.key);
   const hasError = issues.some((issue) => issue.severity === 'error');
   const [isSecretVisible, setIsSecretVisible] = useState(false);
+  const [isPasswordEditable, setIsPasswordEditable] = useState(false);
 
   return (
     <div className={`rounded-xl border p-4 ${hasError ? 'border-red-500/35' : 'border-white/8'} bg-elevated/50`}>
@@ -196,7 +217,7 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
       </div>
 
       {description ? (
-        <p className="mb-3 text-xs text-muted" title={description}>
+        <p className="mb-3 text-xs text-muted-text" title={description}>
           {description}
         </p>
       ) : null}
@@ -209,12 +230,14 @@ export const SettingsField: React.FC<SettingsFieldProps> = ({
           (nextValue) => onChange(item.key, nextValue),
           isSecretVisible,
           () => setIsSecretVisible((previous) => !previous),
+          isPasswordEditable,
+          () => setIsPasswordEditable(true),
         )}
       </div>
 
       {schema?.isSensitive ? (
-        <p className="mt-2 text-[11px] text-secondary">
-          密钥默认隐藏，可点击“显示”查看明文。
+        <p className="mt-2 text-[11px] text-secondary-text">
+          密钥默认隐藏，可点击眼睛图标查看明文。
           {isMultiValue ? ' 支持添加多个输入框进行增删。' : ''}
         </p>
       ) : null}

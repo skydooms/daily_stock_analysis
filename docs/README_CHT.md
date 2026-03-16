@@ -39,6 +39,7 @@
 | 市場 | 全球市場 | 支援 A股、港股、美股 |
 | 復盤 | 大盤復盤 | 每日市場概覽、板塊漲跌、北向資金 |
 | 回測 | AI 回測驗證 | 自動評估歷史分析準確率，方向勝率、止盈止損命中率 |
+| **Agent 問股** | **策略對話** | **多輪策略問答，支援 11 種內建策略（Web/Bot/API）** |
 | 推送 | 多渠道通知 | Telegram、Discord、郵件、企業微信、飛書等 |
 | 自動化 | 定時運行 | GitHub Actions 定時執行，無需伺服器 |
 
@@ -48,7 +49,7 @@
 |------|------|
 | AI 模型 | Gemini（免費）、OpenAI 兼容、DeepSeek、通義千問、Claude、Ollama |
 | 行情數據 | AkShare、Tushare、Pytdx、Baostock、YFinance |
-| 新聞搜索 | Tavily、SerpAPI、Bocha、Brave |
+| 新聞搜索 | Tavily、SerpAPI、Bocha、Brave、MiniMax |
 
 ### 內建交易紀律
 
@@ -94,7 +95,7 @@
 | `TELEGRAM_MESSAGE_THREAD_ID` | Telegram Topic ID (用於發送到子話題) | 可選 |
 | `DISCORD_WEBHOOK_URL` | Discord Webhook URL | 可選 |
 | `DISCORD_BOT_TOKEN` | Discord Bot Token（與 Webhook 二選一） | 可選 |
-| `DISCORD_CHANNEL_ID` | Discord Channel ID（使用 Bot 時需要） | 可選 |
+| `DISCORD_MAIN_CHANNEL_ID` | Discord Channel ID（使用 Bot 時需要） | 可選 |
 | `EMAIL_SENDER` | 發件人郵箱（如 `xxx@qq.com`） | 可選 |
 | `EMAIL_PASSWORD` | 郵箱授權碼（非登錄密碼） | 可選 |
 | `EMAIL_RECEIVERS` | 收件人郵箱（多個用逗號分隔，留空則發給自己） | 可選 |
@@ -118,10 +119,14 @@
 |------------|------|:----:|
 | `STOCK_LIST` | 自選股代碼，如 `600519,hk00700,AAPL,TSLA` | ✅ |
 | `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) 搜索 API（新聞搜索） | 推薦 |
+| `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimaxi.com/) Coding Plan Web Search（結構化搜索結果） | 可選 |
 | `BOCHA_API_KEYS` | [博查搜索](https://open.bocha.cn/) Web Search API（中文搜索優化，支持AI摘要，多個key用逗號分隔） | 可選 |
 | `BRAVE_API_KEYS` | [Brave Search](https://brave.com/search/api/) API（隱私優先，美股優化，多個key用逗號分隔） | 可選 |
 | `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis) 備用搜索 | 可選 |
 | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro/weborder/#/login?reg=834638 ) Token | 可選 |
+| `AGENT_MODE` | 啟用 Agent 策略問股模式（`true`/`false`，預設 `false`） | 可選 |
+| `AGENT_MAX_STEPS` | Agent 最大推理步數（預設 `10`） | 可選 |
+| `AGENT_STRATEGY_DIR` | 自訂策略目錄（預設內建 `strategies/`） | 可選 |
 
 #### 3. 啟用 Actions
 
@@ -200,6 +205,7 @@
 - 📝 **配置管理** - 查看/修改自選股列表
 - 🚀 **快速分析** - 通過 API 接口觸發分析
 - 📊 **實時進度** - 分析任務狀態實時更新，支持多任務並行
+- 🤖 **Agent 策略對話** - 啟用 `AGENT_MODE=true` 後可在 `/chat` 進行多輪問答
 - 📈 **回測驗證** - 評估歷史分析準確率，查詢方向勝率與模擬收益
 
 ### API 接口
@@ -214,7 +220,11 @@
 | `/api/v1/backtest/results` | GET | 查詢回測結果（分頁） |
 | `/api/v1/backtest/performance` | GET | 獲取整體回測表現 |
 | `/api/v1/backtest/performance/{code}` | GET | 獲取單股回測表現 |
+| `/api/v1/agent/strategies` | GET | 取得可用策略清單（內建/自訂） |
+| `/api/v1/agent/chat/stream` | POST (SSE) | Agent 多輪策略對話（流式） |
 | `/api/health` | GET | 健康檢查 |
+
+> 備註：`POST /api/v1/analysis/analyze` 在 `async_mode=false` 時僅支援單一股票；批量 `stock_codes` 需使用 `async_mode=true`。異步 `202` 對單股回傳 `task_id`，對批量回傳 `accepted` / `duplicates` 匯總。
 
 ## 項目結構
 
@@ -300,6 +310,7 @@ daily_stock_analysis/
 
 ## 聯繫與合作
 - GitHub Issues：[提交 Issue](https://github.com/ZhuLinsen/daily_stock_analysis/issues)
+- 合作郵箱：zhuls345@gmail.com
 
 ## Star History
 **如果覺得有用，請給個 ⭐ Star 支持一下！**
@@ -317,4 +328,3 @@ daily_stock_analysis/
 本項目僅供學習和研究使用，不構成任何投資建議。股市有風險，投資需謹慎。作者不對使用本項目產生的任何損失負責。
 
 ---
-

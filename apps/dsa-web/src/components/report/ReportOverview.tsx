@@ -18,10 +18,10 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
 }) => {
   // 根据涨跌幅获取颜色
   const getPriceChangeColor = (changePct: number | undefined): string => {
-    if (changePct === undefined || changePct === null) return 'text-muted';
+    if (changePct === undefined || changePct === null) return 'text-muted-text';
     if (changePct > 0) return 'text-[#ff4d4d]'; // 红涨
     if (changePct < 0) return 'text-[#00d46a]'; // 绿跌
-    return 'text-muted';
+    return 'text-muted-text';
   };
 
   // 格式化涨跌幅
@@ -33,8 +33,8 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* 主信息区 - 两列布局 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* 主信息区 - 两列布局，items-stretch 确保右侧与左侧同高 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
         {/* 左侧：股票信息与结论 */}
         <div className="lg:col-span-2 space-y-4">
           {/* 股票头部 */}
@@ -61,7 +61,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                   <span className="font-mono text-xs text-cyan bg-cyan/10 px-1.5 py-0.5 rounded">
                     {meta.stockCode}
                   </span>
-                  <span className="text-xs text-muted flex items-center gap-1">
+                  <span className="text-xs text-muted-text flex items-center gap-1">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
@@ -118,10 +118,10 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
           </div>
         </div>
 
-        {/* 右侧：情绪指标 */}
-        <div className="space-y-4">
-          <Card variant="bordered" padding="md" className="!overflow-visible">
-            <div className="text-center">
+        {/* 右侧：情绪指标 - 填满格子高度，消除与 STRATEGY POINTS 之间的空隙 */}
+        <div className="flex flex-col self-stretch min-h-full">
+          <Card variant="bordered" padding="md" className="!overflow-visible flex-1 flex flex-col min-h-0">
+            <div className="text-center flex-1 flex flex-col justify-center">
               <h3 className="text-sm font-medium text-white mb-4">Market Sentiment</h3>
               <ScoreGauge score={summary.sentimentScore} size="lg" />
             </div>
