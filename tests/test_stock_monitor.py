@@ -44,6 +44,9 @@ def test_monitor():
         user_id=test_user_id,
         chat_id=test_chat_id,
         monitor_type="simulation",
+        level1_threshold=3.5,
+        level2_threshold=2.0,
+        level3_threshold=0.5,
         window_minutes=10,
     )
     logger.info(f"Result: success={success}, message={msg}")
@@ -54,6 +57,9 @@ def test_monitor():
         user_id=test_user_id,
         chat_id=test_chat_id,
         monitor_type="realtime",
+        level1_threshold=4.0,
+        level2_threshold=2.5,
+        level3_threshold=0.8,
         window_minutes=10,
     )
     logger.info(f"Result: success={success}, message={msg}")
@@ -96,11 +102,14 @@ def test_monitor():
     results = engine.check_all_monitors()
     logger.info(f"Check results: {len(results)} stocks checked")
     for r in results:
-        change_str = f"{r.change_pct:.2f}%" if r.change_pct is not None else "N/A"
+        today_change_str = f"{r.today_change_pct:.2f}%" if r.today_change_pct is not None else "N/A"
+        window_change_str = f"{r.window_change_pct:.2f}%" if r.window_change_pct is not None else "N/A"
         logger.info(
             f"  - {r.stock_name}({r.stock_code}): price={r.current_price}, "
-            f"change={change_str}, 1%={'Y' if r.triggered_1pct else 'N'}, "
-            f"2%={'Y' if r.triggered_2pct else 'N'}"
+            f"today_change={today_change_str}, window_change={window_change_str}, "
+            f"L1={'Y' if r.triggered_level1 else 'N'}, "
+            f"L2={'Y' if r.triggered_level2 else 'N'}, "
+            f"L3={'Y' if r.triggered_level3 else 'N'}"
         )
 
     logger.info("\n--- Test 8: Cleanup - Remove Monitors ---")

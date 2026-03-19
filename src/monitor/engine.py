@@ -4,9 +4,14 @@ Stock Monitor Engine.
 
 Core monitoring logic that:
 1. Fetches real-time stock quotes
-2. Calculates price changes within time windows
-3. Triggers alerts when thresholds are exceeded
+2. Calculates price changes within time windows and from day start
+3. Triggers alerts when thresholds are exceeded (3 levels)
 4. Sends notifications via Feishu
+
+Alert Levels:
+- Level 1 (🔴): Today's change > level1_threshold (default 3.5%)
+- Level 2 (🟠): Today's change > level2_threshold (default 2.0%)
+- Level 3 (🟡): Window change > level3_threshold (default 0.5%)
 """
 
 from __future__ import annotations
@@ -20,7 +25,11 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from data_provider.base import DataFetcherManager
 from src.config import get_config
-from src.monitor.models import StockMonitorConfig, StockMonitorState
+from src.monitor.models import (
+    StockMonitorConfig, StockMonitorState,
+    get_now_cn, TZ_CN
+)
+from src.repositories.stock_monitor_repo import is_same_day_cn
 from src.repositories.stock_monitor_repo import StockMonitorRepository
 
 if TYPE_CHECKING:
@@ -36,12 +45,22 @@ class MonitorResult:
     stock_code: str
     stock_name: str
     current_price: float
-    baseline_price: float
-    change_pct: float
-    window_minutes: int
-    triggered_1pct: bool
-    triggered_2pct: bool
-    alert_sent: bool
+
+    # Today change (for level 1 and 2)
+    today_start_price: Optional[float] = None
+    today_change_pct: Optional[float] = None
+
+    # Window change (for level 3)
+    window_baseline_price: Optional[float] = None
+    window_change_pct: Optional[float] = None
+    window_minutes: int = 10
+
+    # Trigger status
+    triggered_level1: bool = False
+    triggered_level2: bool = False
+    triggered_level3: bool = False
+
+    alert_sent: bool = False
     error: Optional[str] = None
 
 
@@ -134,7 +153,7 @@ class MonitorEngine:
         """Check a single monitor configuration."""
         stock_code = config.stock_code
         stock_name = config.stock_name or stock_code
-        now = datetime.now()
+        now = get_now_cn()
 
         quote = self.data_fetcher.get_realtime_quote(stock_code)
         if not quote or not quote.has_basic_data():
@@ -148,103 +167,164 @@ class MonitorEngine:
             logger.warning(f"[MonitorEngine] No state for config {config.id}")
             return None
 
+        result = MonitorResult(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            current_price=current_price,
+            window_minutes=config.window_minutes,
+        )
+
+        # Initialize or check today's start price (for level 1 and 2)
+        if (state.today_start_price is None or
+                state.today_start_time is None or
+                not is_same_day_cn(state.today_start_time, now)):
+            # New day, reset today's start price
+            self.repo.reset_today_start(config.id, current_price, now)
+            logger.info(f"[MonitorEngine] Initialized today start for {stock_code}: {current_price}")
+            state.today_start_price = current_price
+            state.today_start_time = now
+
+        result.today_start_price = state.today_start_price
+        if state.today_start_price > 0:
+            result.today_change_pct = (current_price - state.today_start_price) / state.today_start_price * 100
+
+        # Initialize or check window baseline (for level 3)
         if state.baseline_price is None or state.baseline_time is None:
             self.repo.reset_baseline(config.id, current_price, now)
-            logger.info(f"[MonitorEngine] Initialized baseline for {stock_code}: {current_price}")
-            return MonitorResult(
-                stock_code=stock_code,
-                stock_name=stock_name,
-                current_price=current_price,
-                baseline_price=current_price,
-                change_pct=0.0,
-                window_minutes=config.window_minutes,
-                triggered_1pct=False,
-                triggered_2pct=False,
-                alert_sent=False,
-            )
+            logger.info(f"[MonitorEngine] Initialized window baseline for {stock_code}: {current_price}")
+            state.baseline_price = current_price
+            state.baseline_time = now
 
+        result.window_baseline_price = state.baseline_price
+        if state.baseline_price > 0:
+            result.window_change_pct = (current_price - state.baseline_price) / state.baseline_price * 100
+
+        # Check if window expired
         window_expired = (now - state.baseline_time) >= timedelta(minutes=config.window_minutes)
         if window_expired:
             self.repo.reset_baseline(config.id, current_price, now)
             logger.info(
                 f"[MonitorEngine] Window expired, reset baseline for {stock_code}: {current_price}"
             )
-            return MonitorResult(
-                stock_code=stock_code,
-                stock_name=stock_name,
-                current_price=current_price,
-                baseline_price=current_price,
-                change_pct=0.0,
-                window_minutes=config.window_minutes,
-                triggered_1pct=False,
-                triggered_2pct=False,
-                alert_sent=False,
-            )
+            state.baseline_price = current_price
+            result.window_baseline_price = current_price
+            result.window_change_pct = 0.0
 
-        baseline_price = state.baseline_price
-        if baseline_price <= 0:
-            self.repo.reset_baseline(config.id, current_price, now)
-            return None
-
-        change_pct = (current_price - baseline_price) / baseline_price * 100
-
-        triggered_1pct = abs(change_pct) >= 1.0
-        triggered_2pct = abs(change_pct) >= 2.0
-
-        alert_sent = False
+        # Check thresholds
+        result.triggered_level1 = False
+        result.triggered_level2 = False
+        result.triggered_level3 = False
 
         if config.monitor_type == "realtime":
-            if config.threshold_2pct_enabled and triggered_2pct and not state.alert_2pct_triggered:
-                alert_sent = self._send_alert(
-                    config=config,
-                    stock_name=stock_name,
-                    change_pct=change_pct,
-                    current_price=current_price,
-                    alert_type="threshold_2pct",
-                )
-                if alert_sent:
-                    self.repo.update_state(config.id, alert_2pct_triggered=True)
-                    self.repo.add_alert(
-                        config_id=config.id,
-                        stock_code=stock_code,
-                        alert_type="threshold_2pct",
-                        change_pct=change_pct,
-                        price=current_price,
-                        notified=True,
-                    )
+            # Level 1: Today's change > level1_threshold
+            if (config.level1_enabled and result.today_change_pct is not None and
+                    abs(result.today_change_pct) >= config.level1_threshold and
+                    not state.alert_level1_triggered):
+                result.triggered_level1 = True
 
-            if config.threshold_1pct_enabled and triggered_1pct and not state.alert_1pct_triggered:
-                self.repo.update_state(config.id, alert_1pct_triggered=True)
+            # Level 2: Today's change > level2_threshold
+            if (config.level2_enabled and result.today_change_pct is not None and
+                    abs(result.today_change_pct) >= config.level2_threshold and
+                    not state.alert_level2_triggered):
+                result.triggered_level2 = True
+
+            # Level 3: Window change > level3_threshold
+            if (config.level3_enabled and result.window_change_pct is not None and
+                    abs(result.window_change_pct) >= config.level3_threshold and
+                    not state.alert_level3_triggered):
+                result.triggered_level3 = True
+
+        # Send alerts (from highest to lowest level)
+        alert_sent = False
+
+        if result.triggered_level1:
+            alert_sent = self._send_alert(
+                config=config,
+                stock_name=stock_name,
+                change_pct=result.today_change_pct,
+                current_price=current_price,
+                alert_level=1,
+                alert_type="today_change",
+            )
+            if alert_sent:
+                self.repo.update_state(config.id, alert_level1_triggered=True)
                 self.repo.add_alert(
                     config_id=config.id,
                     stock_code=stock_code,
-                    alert_type="threshold_1pct",
-                    change_pct=change_pct,
+                    alert_level=1,
+                    alert_type="today_change",
+                    change_pct=result.today_change_pct,
+                    price=current_price,
+                    notified=True,
+                )
+
+        elif result.triggered_level2:
+            alert_sent = self._send_alert(
+                config=config,
+                stock_name=stock_name,
+                change_pct=result.today_change_pct,
+                current_price=current_price,
+                alert_level=2,
+                alert_type="today_change",
+            )
+            if alert_sent:
+                self.repo.update_state(config.id, alert_level2_triggered=True)
+                self.repo.add_alert(
+                    config_id=config.id,
+                    stock_code=stock_code,
+                    alert_level=2,
+                    alert_type="today_change",
+                    change_pct=result.today_change_pct,
+                    price=current_price,
+                    notified=True,
+                )
+
+        elif result.triggered_level3:
+            alert_sent = self._send_alert(
+                config=config,
+                stock_name=stock_name,
+                change_pct=result.window_change_pct,
+                current_price=current_price,
+                alert_level=3,
+                alert_type="window_change",
+            )
+            if alert_sent:
+                self.repo.update_state(config.id, alert_level3_triggered=True)
+                self.repo.add_alert(
+                    config_id=config.id,
+                    stock_code=stock_code,
+                    alert_level=3,
+                    alert_type="window_change",
+                    change_pct=result.window_change_pct,
+                    price=current_price,
+                    notified=True,
+                )
+            else:
+                # Record alert even if notification failed
+                self.repo.add_alert(
+                    config_id=config.id,
+                    stock_code=stock_code,
+                    alert_level=3,
+                    alert_type="window_change",
+                    change_pct=result.window_change_pct,
                     price=current_price,
                     notified=False,
                 )
                 logger.info(
-                    f"[MonitorEngine] 1% threshold triggered for {stock_code}: {change_pct:.2f}%"
+                    f"[MonitorEngine] Level 3 threshold triggered for {stock_code}: {result.window_change_pct:.2f}%"
                 )
 
+        result.alert_sent = alert_sent
+
+        # Update state
         self.repo.update_state(
             config.id,
             last_price=current_price,
-            last_change_pct=change_pct,
+            last_change_pct=result.today_change_pct or result.window_change_pct,
             last_check_time=now,
         )
 
-        return MonitorResult(
-            stock_code=stock_code,
-            stock_name=stock_name,
-            current_price=current_price,
-            baseline_price=baseline_price,
-            change_pct=change_pct,
-            window_minutes=config.window_minutes,
-            triggered_1pct=triggered_1pct,
-            triggered_2pct=triggered_2pct,
-            alert_sent=alert_sent,
-        )
+        return result
 
     def _send_alert(
         self,
@@ -252,20 +332,37 @@ class MonitorEngine:
         stock_name: str,
         change_pct: float,
         current_price: float,
+        alert_level: int,
         alert_type: str,
     ) -> bool:
         """Send an alert notification."""
         direction = "上涨" if change_pct > 0 else "下跌"
         abs_change = abs(change_pct)
 
-        title = f"⚠️ {stock_name}({config.stock_code}) {direction}预警"
+        level_icons = {1: "🔴", 2: "🟠", 3: "🟡"}
+        level_names = {1: "一级", 2: "二级", 3: "三级"}
+        threshold_descs = {
+            1: f"今日涨跌幅超{config.level1_threshold}%",
+            2: f"今日涨跌幅超{config.level2_threshold}%",
+            3: f"{config.window_minutes}分钟内涨跌幅超{config.level3_threshold}%",
+        }
+
+        icon = level_icons.get(alert_level, "⚠️")
+        level_name = level_names.get(alert_level, "")
+        threshold_desc = threshold_descs.get(alert_level, "")
+
+        title = f"{icon} {level_name}预警 {stock_name}({config.stock_code}) {direction}"
         message = (
             f"**{stock_name}** ({config.stock_code})\n"
             f"**{direction} {abs_change:.2f}%**\n\n"
+            f"预警级别: {icon} {level_name}\n"
+            f"触发条件: {threshold_desc}\n"
             f"当前价格: ¥{current_price:.2f}\n"
-            f"触发时间: {datetime.now().strftime('%H:%M:%S')}\n"
-            f"监控窗口: {config.window_minutes}分钟\n"
+            f"触发时间: {get_now_cn().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
+
+        if alert_type == "window_change":
+            message += f"监控窗口: {config.window_minutes}分钟\n"
 
         if self._notifier:
             try:
@@ -292,6 +389,12 @@ class MonitorEngine:
         user_id: Optional[str] = None,
         chat_id: Optional[str] = None,
         monitor_type: str = "realtime",
+        level1_threshold: float = 3.5,
+        level1_enabled: bool = True,
+        level2_threshold: float = 2.0,
+        level2_enabled: bool = True,
+        level3_threshold: float = 0.5,
+        level3_enabled: bool = True,
         window_minutes: int = 10,
     ) -> Tuple[bool, str]:
         """Add a stock to monitoring.
@@ -309,6 +412,12 @@ class MonitorEngine:
             user_id=user_id,
             chat_id=chat_id,
             monitor_type=monitor_type,
+            level1_threshold=level1_threshold,
+            level1_enabled=level1_enabled,
+            level2_threshold=level2_threshold,
+            level2_enabled=level2_enabled,
+            level3_threshold=level3_threshold,
+            level3_enabled=level3_enabled,
             window_minutes=window_minutes,
         )
 

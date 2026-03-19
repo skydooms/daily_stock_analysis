@@ -37,8 +37,9 @@ class MonitorInfo:
     change_pct: Optional[float] = None
     baseline_price: Optional[float] = None
     last_check_time: Optional[datetime] = None
-    alert_1pct_triggered: bool = False
-    alert_2pct_triggered: bool = False
+    alert_level1_triggered: bool = False
+    alert_level2_triggered: bool = False
+    alert_level3_triggered: bool = False
 
 
 class StockMonitorService:
@@ -71,6 +72,12 @@ class StockMonitorService:
         chat_id: str,
         stock_name: Optional[str] = None,
         monitor_type: str = "realtime",
+        level1_threshold: float = 3.5,
+        level1_enabled: bool = True,
+        level2_threshold: float = 2.0,
+        level2_enabled: bool = True,
+        level3_threshold: float = 0.5,
+        level3_enabled: bool = True,
         window_minutes: int = 10,
     ) -> Tuple[bool, str]:
         """
@@ -82,7 +89,13 @@ class StockMonitorService:
             chat_id: Chat ID for sending notifications
             stock_name: Optional stock name (will be fetched if not provided)
             monitor_type: "realtime" or "simulation"
-            window_minutes: Time window in minutes for threshold calculation
+            level1_threshold: Level 1 threshold percentage (default 3.5%)
+            level1_enabled: Whether level 1 is enabled
+            level2_threshold: Level 2 threshold percentage (default 2.0%)
+            level2_enabled: Whether level 2 is enabled
+            level3_threshold: Level 3 threshold percentage (default 0.5%)
+            level3_enabled: Whether level 3 is enabled
+            window_minutes: Time window in minutes for level 3
 
         Returns:
             Tuple of (success, message)
@@ -98,6 +111,12 @@ class StockMonitorService:
             user_id=user_id,
             chat_id=chat_id,
             monitor_type=monitor_type,
+            level1_threshold=level1_threshold,
+            level1_enabled=level1_enabled,
+            level2_threshold=level2_threshold,
+            level2_enabled=level2_enabled,
+            level3_threshold=level3_threshold,
+            level3_enabled=level3_enabled,
             window_minutes=window_minutes,
         )
 
@@ -148,8 +167,9 @@ class StockMonitorService:
                 change_pct=state.last_change_pct if state else None,
                 baseline_price=state.baseline_price if state else None,
                 last_check_time=state.last_check_time if state else None,
-                alert_1pct_triggered=state.alert_1pct_triggered if state else False,
-                alert_2pct_triggered=state.alert_2pct_triggered if state else False,
+                alert_level1_triggered=state.alert_level1_triggered if state else False,
+                alert_level2_triggered=state.alert_level2_triggered if state else False,
+                alert_level3_triggered=state.alert_level3_triggered if state else False,
             )
 
             if quote and quote.has_basic_data():
@@ -190,8 +210,9 @@ class StockMonitorService:
             change_pct=state.last_change_pct if state else None,
             baseline_price=state.baseline_price if state else None,
             last_check_time=state.last_check_time if state else None,
-            alert_1pct_triggered=state.alert_1pct_triggered if state else False,
-            alert_2pct_triggered=state.alert_2pct_triggered if state else False,
+            alert_level1_triggered=state.alert_level1_triggered if state else False,
+            alert_level2_triggered=state.alert_level2_triggered if state else False,
+            alert_level3_triggered=state.alert_level3_triggered if state else False,
         )
 
         if quote and quote.has_basic_data():
@@ -289,14 +310,17 @@ class StockMonitorService:
             price_str = f"¥{m.current_price:.2f}" if m.current_price else "--"
             change_str = f"{m.change_pct:+.2f}%" if m.change_pct is not None else "--"
 
-            alert_1 = "✅" if m.alert_1pct_triggered else "⬜"
-            alert_2 = "✅" if m.alert_2pct_triggered else "⬜"
+            alert_l1 = "✅" if m.alert_level1_triggered else "⬜"
+            alert_l2 = "✅" if m.alert_level2_triggered else "⬜"
+            alert_l3 = "✅" if m.alert_level3_triggered else "⬜"
 
             lines.append(
                 f"{i}. {type_icon} **{m.stock_name}** ({m.config.stock_code})\n"
                 f"   价格: {price_str} | 涨跌: {change_str}\n"
                 f"   窗口: {m.config.window_minutes}分钟 | 状态: {status}\n"
-                f"   1%阈值: {alert_1} | 2%阈值: {alert_2}\n"
+                f"   一级({m.config.level1_threshold}%): {alert_l1} | "
+                f"二级({m.config.level2_threshold}%): {alert_l2} | "
+                f"三级({m.config.level3_threshold}%): {alert_l3}\n"
             )
 
         return "\n".join(lines)

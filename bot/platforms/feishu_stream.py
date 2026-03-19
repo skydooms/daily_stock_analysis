@@ -69,9 +69,11 @@ class FeishuReplyClient:
         if not FEISHU_SDK_AVAILABLE:
             raise ImportError("lark-oapi SDK 未安装")
 
+        # 使用飞书开放平台域名（企业自建应用使用 feishu.cn）
         self._client = lark.Client.builder() \
             .app_id(app_id) \
             .app_secret(app_secret) \
+            .domain(lark.FEISHU_DOMAIN) \
             .log_level(lark.LogLevel.WARNING) \
             .build()
 
@@ -156,7 +158,8 @@ class FeishuReplyClient:
             return True
 
         except Exception as e:
-            logger.error(f"[Feishu Stream] 发送交互卡片异常: {e}")
+            import traceback
+            logger.error(f"[Feishu Stream] 发送交互卡片异常: {e}\n{traceback.format_exc()}")
             return False
 
     def reply_text(self, message_id: str, text: str, at_user: bool = False,

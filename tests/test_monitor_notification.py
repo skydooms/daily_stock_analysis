@@ -22,6 +22,40 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def cleanup_test_data():
+    """Cleanup any existing test data."""
+    from src.storage import DatabaseManager
+    from src.monitor.models import StockMonitorConfig, StockMonitorState, StockMonitorAlert
+    from sqlalchemy import delete
+
+    db = DatabaseManager.get_instance()
+    with db.get_session() as session:
+        # Delete all test data
+        session.execute(
+            delete(StockMonitorAlert).where(
+                StockMonitorAlert.config_id.in_(
+                    session.query(StockMonitorConfig.id)
+                    .where(StockMonitorConfig.user_id.like("test_user_%"))
+                    .subquery()
+                )
+            )
+        )
+        session.execute(
+            delete(StockMonitorState).where(
+                StockMonitorState.config_id.in_(
+                    session.query(StockMonitorConfig.id)
+                    .where(StockMonitorConfig.user_id.like("test_user_%"))
+                    .subquery()
+                )
+            )
+        )
+        result = session.execute(
+            delete(StockMonitorConfig).where(StockMonitorConfig.user_id.like("test_user_%"))
+        )
+        session.commit()
+        logger.info(f"Cleaned up {result.rowcount} test config(s)")
+
+
 def test_monitor_notification():
     """Test monitor notification with simulated price change."""
     from src.monitor.engine import get_monitor_engine
@@ -32,12 +66,17 @@ def test_monitor_notification():
     service = get_monitor_service()
     engine = get_monitor_engine()
 
-    test_user_id = "test_user_001"
-    test_chat_id = "test_chat_001"
+    import time
+    test_user_id = f"test_user_{int(time.time())}"
+    test_chat_id = "oc_c4f728163782081095ba208e2cd0ae3e"
 
     logger.info("=" * 60)
     logger.info("Stock Monitor Notification Test")
     logger.info("=" * 60)
+
+    # Cleanup old test data
+    logger.info("\n--- Cleaning up old test data ---")
+    cleanup_test_data()
 
     # 检查飞书配置
     logger.info("\n--- 检查飞书配置 ---")
@@ -68,6 +107,9 @@ def test_monitor_notification():
         user_id=test_user_id,
         chat_id=test_chat_id,
         monitor_type="realtime",
+        level1_threshold=3.5,
+        level2_threshold=2.0,
+        level3_threshold=0.5,
         window_minutes=10,
     )
     logger.info(f"Result: success={success}, message={msg}")
@@ -78,6 +120,9 @@ def test_monitor_notification():
         user_id=test_user_id,
         chat_id=test_chat_id,
         monitor_type="realtime",
+        level1_threshold=3.5,
+        level2_threshold=2.0,
+        level3_threshold=0.5,
         window_minutes=10,
     )
     logger.info(f"Result: success={success}, message={msg}")
@@ -94,40 +139,54 @@ def test_monitor_notification():
     results = engine.check_all_monitors()
     for r in results:
         logger.info(
-            f"  - {r.stock_name}({r.stock_code}): baseline_price={r.baseline_price}"
+            f"  - {r.stock_name}({r.stock_code}): "
+            f"today_start_price={r.today_start_price}, window_baseline_price={r.window_baseline_price}"
         )
 
-    logger.info("\n--- Test 5: Simulate Price Change > 2% ---")
-    # 直接修改数据库中的基准价格，模拟涨跌幅超过2%
+    logger.info("\n--- Test 5: Simulate Price Change > 0.5% (level 3) and > 2% (level 2) ---")
+    # 直接修改数据库中的基准价格，模拟涨跌幅
     from src.repositories.stock_monitor_repo import StockMonitorRepository
+    from src.monitor.models import get_now_cn
     repo = StockMonitorRepository()
 
     for monitor in monitors:
         config_obj = monitor.config
         state = repo.get_state(config_obj.id)
-        if state and state.baseline_price:
-            # 模拟基准价格为当前价格的 97%（模拟上涨3%）
-            simulated_baseline = state.last_price * 0.97 if state.last_price else 100
+        if state and state.last_price:
+            # 模拟今日起始价格为当前价格的 97%（模拟上涨3% - 触发level 1和level 2）
+            simulated_today_start = state.last_price * 0.97
+            # 模拟窗口基准价格为当前价格的 99%（模拟上涨1% - 触发level 3）
+            simulated_window_baseline = state.last_price * 0.99
             logger.info(
                 f"  Simulating {config_obj.stock_code}: "
-                f"baseline={simulated_baseline:.2f} -> current={state.last_price:.2f} "
-                f"(change={((state.last_price - simulated_baseline) / simulated_baseline * 100):.2f}%)"
+                f"today_start={simulated_today_start:.2f} -> current={state.last_price:.2f} "
+                f"(today_change={((state.last_price - simulated_today_start) / simulated_today_start * 100):.2f}%)"
+            )
+            logger.info(
+                f"  window_baseline={simulated_window_baseline:.2f} -> current={state.last_price:.2f} "
+                f"(window_change={((state.last_price - simulated_window_baseline) / simulated_window_baseline * 100):.2f}%)"
             )
             # 更新基准价格
-            from datetime import datetime
             repo.update_state(
                 config_obj.id,
-                baseline_price=simulated_baseline,
-                baseline_time=datetime.now(),
-                alert_2pct_triggered=False,  # 重置触发标志
+                today_start_price=simulated_today_start,
+                today_start_time=get_now_cn(),
+                baseline_price=simulated_window_baseline,
+                baseline_time=get_now_cn(),
+                alert_level1_triggered=False,
+                alert_level2_triggered=False,
+                alert_level3_triggered=False,
             )
 
-    logger.info("\n--- Test 6: Run Check Cycle (Should trigger 2% alert) ---")
+    logger.info("\n--- Test 6: Run Check Cycle (Should trigger alerts) ---")
     results = engine.check_all_monitors()
     for r in results:
         logger.info(
             f"  - {r.stock_name}({r.stock_code}): price={r.current_price}, "
-            f"change={r.change_pct:.2f}%, 2%={'TRIGGERED' if r.triggered_2pct else 'N'}, "
+            f"today_change={r.today_change_pct:.2f}%, window_change={r.window_change_pct:.2f}%, "
+            f"L1={'TRIGGERED' if r.triggered_level1 else 'N'}, "
+            f"L2={'TRIGGERED' if r.triggered_level2 else 'N'}, "
+            f"L3={'TRIGGERED' if r.triggered_level3 else 'N'}, "
             f"alert_sent={r.alert_sent}"
         )
 

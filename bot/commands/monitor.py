@@ -50,7 +50,7 @@ class MonitorCommand(BotCommand):
         return (
             "/monitor <子命令> [参数]\n"
             "子命令:\n"
-            "  add <股票代码> [窗口] - 添加实时监控\n"
+            "  add <股票代码> [窗口] [一级阈值] [二级阈值] [三级阈值] - 添加实时监控\n"
             "  remove <股票代码> - 移除监控\n"
             "  list - 列出监控列表\n"
             "  start - 启动监控引擎\n"
@@ -94,13 +94,15 @@ class MonitorCommand(BotCommand):
         help_text = """📊 **持仓股票实时监控**
 
 **功能说明：**
-- 监控持仓股票的实时价格变动
-- 10分钟内涨跌幅超过±1%时记录
-- 涨跌幅超过±2%时发送通知
+- 三级预警系统，可配置各等级阈值
+- 🔴 一级：今日涨跌幅超3.5%（可配置）
+- 🟠 二级：今日涨跌幅超2.0%（可配置）
+- 🟡 三级：10分钟内涨跌幅超0.5%（可配置）
 
 **子命令：**
-`/monitor add <股票代码> [窗口]`
+`/monitor add <股票代码> [窗口] [一级阈值] [二级阈值] [三级阈值]`
   添加实时监控，默认窗口10分钟
+  阈值可选，默认：3.5/2.0/0.5
 
 `/monitor remove <股票代码>`
   移除指定股票的监控
@@ -124,8 +126,8 @@ class MonitorCommand(BotCommand):
   查看最近24小时告警历史
 
 **示例：**
-`/monitor add 600519` - 添加茅台实时监控
-`/monitor add 00700.HK 15` - 添加腾讯，窗口15分钟
+`/monitor add 600519` - 添加茅台，使用默认阈值
+`/monitor add 00700.HK 15 5.0 3.0 1.0` - 添加腾讯，15分钟窗口，阈值5/3/1
 `/monitor simulate 600519` - 添加模拟监控
 `/monitor list` - 查看监控列表
 """
@@ -134,18 +136,53 @@ class MonitorCommand(BotCommand):
     def _handle_add(self, message: BotMessage, args: List[str]) -> BotResponse:
         """处理 add 子命令"""
         if not args:
-            return BotResponse.text_response("请提供股票代码\n用法: /monitor add <股票代码> [窗口分钟]")
+            return BotResponse.text_response(
+                "请提供股票代码\n用法: /monitor add <股票代码> [窗口] [一级阈值] [二级阈值] [三级阈值]"
+            )
 
         stock_code = args[0].upper()
         window_minutes = 10
+        level1_threshold = 3.5
+        level2_threshold = 2.0
+        level3_threshold = 0.5
 
-        if len(args) > 1:
+        # Parse optional parameters
+        arg_idx = 1
+        if len(args) > arg_idx:
             try:
-                window_minutes = int(args[1])
+                window_minutes = int(args[arg_idx])
                 if window_minutes < 1 or window_minutes > 60:
                     return BotResponse.text_response("窗口时间应在 1-60 分钟之间")
+                arg_idx += 1
             except ValueError:
                 return BotResponse.text_response("窗口时间应为数字")
+
+        if len(args) > arg_idx:
+            try:
+                level1_threshold = float(args[arg_idx])
+                if level1_threshold <= 0:
+                    return BotResponse.text_response("一级阈值必须大于0")
+                arg_idx += 1
+            except ValueError:
+                return BotResponse.text_response("一级阈值应为数字")
+
+        if len(args) > arg_idx:
+            try:
+                level2_threshold = float(args[arg_idx])
+                if level2_threshold <= 0:
+                    return BotResponse.text_response("二级阈值必须大于0")
+                arg_idx += 1
+            except ValueError:
+                return BotResponse.text_response("二级阈值应为数字")
+
+        if len(args) > arg_idx:
+            try:
+                level3_threshold = float(args[arg_idx])
+                if level3_threshold <= 0:
+                    return BotResponse.text_response("三级阈值必须大于0")
+                arg_idx += 1
+            except ValueError:
+                return BotResponse.text_response("三级阈值应为数字")
 
         from src.services.stock_monitor_service import get_monitor_service
 
@@ -155,11 +192,19 @@ class MonitorCommand(BotCommand):
             user_id=message.user_id,
             chat_id=message.chat_id,
             monitor_type="realtime",
+            level1_threshold=level1_threshold,
+            level2_threshold=level2_threshold,
+            level3_threshold=level3_threshold,
             window_minutes=window_minutes,
         )
 
         if success:
-            return BotResponse.markdown_response(f"✅ {msg}\n\n监控类型: 🔴 实时监控\n窗口时间: {window_minutes}分钟")
+            return BotResponse.markdown_response(
+                f"✅ {msg}\n\n"
+                f"监控类型: 🔴 实时监控\n"
+                f"窗口时间: {window_minutes}分钟\n"
+                f"预警阈值: 🔴{level1_threshold}% / 🟠{level2_threshold}% / 🟡{level3_threshold}%"
+            )
         else:
             return BotResponse.text_response(f"❌ {msg}")
 
@@ -236,8 +281,9 @@ class MonitorCommand(BotCommand):
             "",
             "**最近24小时告警:**",
             f"• 总计: {status['alerts_24h']['total_alerts']}",
-            f"• 1%阈值: {status['alerts_24h']['threshold_1pct_count']}",
-            f"• 2%阈值: {status['alerts_24h']['threshold_2pct_count']}",
+            f"• 🔴 一级预警: {status['alerts_24h']['level1_count']}",
+            f"• 🟠 二级预警: {status['alerts_24h']['level2_count']}",
+            f"• 🟡 三级预警: {status['alerts_24h']['level3_count']}",
             f"• 涉及股票: {status['alerts_24h']['unique_stocks']} 只",
         ]
 
@@ -289,16 +335,22 @@ class MonitorCommand(BotCommand):
         if not alerts:
             return BotResponse.markdown_response("📭 最近24小时无告警记录")
 
-        lines = ["📋 **告警历史（最近24小时）\n"]
+        lines = ["📋 **告警历史（最近24小时）**\n"]
+
+        level_icons = {1: "🔴", 2: "🟠", 3: "🟡"}
+        level_names = {1: "一级", 2: "二级", 3: "三级"}
 
         for alert in alerts[:20]:
-            type_icon = "⚠️" if alert["alert_type"] == "threshold_2pct" else "📊"
+            level = alert["alert_level"]
+            type_icon = level_icons.get(level, "⚠️")
+            level_name = level_names.get(level, "")
             direction = "上涨" if alert["change_pct"] > 0 else "下跌"
+            alert_type_desc = "今日变化" if alert["alert_type"] == "today_change" else "窗口变化"
             time_str = alert["alert_time"].split("T")[1][:8] if "T" in alert["alert_time"] else alert["alert_time"]
 
             lines.append(
-                f"{type_icon} **{alert['stock_code']}** {direction} {abs(alert['change_pct']):.2f}%\n"
-                f"   价格: ¥{alert['price']:.2f} | 时间: {time_str}\n"
+                f"{type_icon} **{alert['stock_code']}** {level_name}预警 {direction} {abs(alert['change_pct']):.2f}%\n"
+                f"   类型: {alert_type_desc} | 价格: ¥{alert['price']:.2f} | 时间: {time_str}\n"
             )
 
         if len(alerts) > 20:

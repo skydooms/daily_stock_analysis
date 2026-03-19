@@ -11,9 +11,21 @@ from sqlalchemy import and_, delete, desc, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from src.storage import DatabaseManager
-from src.monitor.models import StockMonitorAlert, StockMonitorConfig, StockMonitorState
+from src.monitor.models import (
+    StockMonitorAlert, StockMonitorConfig, StockMonitorState,
+    get_now_cn, TZ_CN
+)
 
 logger = logging.getLogger(__name__)
+
+
+def is_same_day_cn(d1: datetime, d2: datetime) -> bool:
+    """Check if two datetimes are the same day in China timezone."""
+    d1_cn = d1.astimezone(TZ_CN) if d1.tzinfo else d1.replace(tzinfo=TZ_CN)
+    d2_cn = d2.astimezone(TZ_CN) if d2.tzinfo else d2.replace(tzinfo=TZ_CN)
+    return (d1_cn.year == d2_cn.year and
+            d1_cn.month == d2_cn.month and
+            d1_cn.day == d2_cn.day)
 
 
 class StockMonitorRepository:
@@ -36,8 +48,12 @@ class StockMonitorRepository:
         user_id: Optional[str] = None,
         chat_id: Optional[str] = None,
         monitor_type: str = "realtime",
-        threshold_1pct_enabled: bool = True,
-        threshold_2pct_enabled: bool = True,
+        level1_threshold: float = 3.5,
+        level1_enabled: bool = True,
+        level2_threshold: float = 2.0,
+        level2_enabled: bool = True,
+        level3_threshold: float = 0.5,
+        level3_enabled: bool = True,
         window_minutes: int = 10,
     ) -> Optional[StockMonitorConfig]:
         """Add a new monitor configuration."""
@@ -49,8 +65,12 @@ class StockMonitorRepository:
                     user_id=user_id,
                     chat_id=chat_id,
                     monitor_type=monitor_type,
-                    threshold_1pct_enabled=threshold_1pct_enabled,
-                    threshold_2pct_enabled=threshold_2pct_enabled,
+                    level1_threshold=level1_threshold,
+                    level1_enabled=level1_enabled,
+                    level2_threshold=level2_threshold,
+                    level2_enabled=level2_enabled,
+                    level3_threshold=level3_threshold,
+                    level3_enabled=level3_enabled,
                     window_minutes=window_minutes,
                     is_active=True,
                 )
@@ -153,7 +173,7 @@ class StockMonitorRepository:
             result = session.execute(
                 update(StockMonitorConfig)
                 .where(StockMonitorConfig.id == config_id)
-                .values(is_active=is_active, updated_at=datetime.now())
+                .values(is_active=is_active, updated_at=get_now_cn())
             )
             session.commit()
             return result.rowcount > 0
@@ -179,29 +199,38 @@ class StockMonitorRepository:
         config_id: int,
         baseline_price: Optional[float] = None,
         baseline_time: Optional[datetime] = None,
+        today_start_price: Optional[float] = None,
+        today_start_time: Optional[datetime] = None,
         last_price: Optional[float] = None,
         last_change_pct: Optional[float] = None,
         last_check_time: Optional[datetime] = None,
-        alert_1pct_triggered: Optional[bool] = None,
-        alert_2pct_triggered: Optional[bool] = None,
+        alert_level1_triggered: Optional[bool] = None,
+        alert_level2_triggered: Optional[bool] = None,
+        alert_level3_triggered: Optional[bool] = None,
     ) -> bool:
         """Update the monitoring state."""
         with self.db.get_session() as session:
-            values = {"updated_at": datetime.now()}
+            values = {"updated_at": get_now_cn()}
             if baseline_price is not None:
                 values["baseline_price"] = baseline_price
             if baseline_time is not None:
                 values["baseline_time"] = baseline_time
+            if today_start_price is not None:
+                values["today_start_price"] = today_start_price
+            if today_start_time is not None:
+                values["today_start_time"] = today_start_time
             if last_price is not None:
                 values["last_price"] = last_price
             if last_change_pct is not None:
                 values["last_change_pct"] = last_change_pct
             if last_check_time is not None:
                 values["last_check_time"] = last_check_time
-            if alert_1pct_triggered is not None:
-                values["alert_1pct_triggered"] = alert_1pct_triggered
-            if alert_2pct_triggered is not None:
-                values["alert_2pct_triggered"] = alert_2pct_triggered
+            if alert_level1_triggered is not None:
+                values["alert_level1_triggered"] = alert_level1_triggered
+            if alert_level2_triggered is not None:
+                values["alert_level2_triggered"] = alert_level2_triggered
+            if alert_level3_triggered is not None:
+                values["alert_level3_triggered"] = alert_level3_triggered
 
             result = session.execute(
                 update(StockMonitorState)
@@ -217,22 +246,37 @@ class StockMonitorRepository:
         baseline_price: float,
         baseline_time: datetime,
     ) -> bool:
-        """Reset baseline and clear alert flags."""
+        """Reset window baseline and clear level 3 alert flags."""
         return self.update_state(
             config_id=config_id,
             baseline_price=baseline_price,
             baseline_time=baseline_time,
             last_price=baseline_price,
             last_change_pct=0.0,
-            last_check_time=datetime.now(),
-            alert_1pct_triggered=False,
-            alert_2pct_triggered=False,
+            last_check_time=get_now_cn(),
+            alert_level3_triggered=False,
+        )
+
+    def reset_today_start(
+        self,
+        config_id: int,
+        start_price: float,
+        start_time: datetime,
+    ) -> bool:
+        """Reset today's start price and clear level 1/2 alert flags."""
+        return self.update_state(
+            config_id=config_id,
+            today_start_price=start_price,
+            today_start_time=start_time,
+            alert_level1_triggered=False,
+            alert_level2_triggered=False,
         )
 
     def add_alert(
         self,
         config_id: int,
         stock_code: str,
+        alert_level: int,
         alert_type: str,
         change_pct: float,
         price: float,
@@ -244,17 +288,18 @@ class StockMonitorRepository:
                 alert = StockMonitorAlert(
                     config_id=config_id,
                     stock_code=stock_code.upper(),
+                    alert_level=alert_level,
                     alert_type=alert_type,
                     change_pct=change_pct,
                     price=price,
-                    alert_time=datetime.now(),
+                    alert_time=get_now_cn(),
                     notified=notified,
                 )
                 session.add(alert)
                 session.commit()
                 session.refresh(alert)
                 logger.info(
-                    f"[MonitorRepo] Added alert: {stock_code} {alert_type} {change_pct:.2f}%"
+                    f"[MonitorRepo] Added alert: {stock_code} Level {alert_level} {alert_type} {change_pct:.2f}%"
                 )
                 return alert
             except Exception as e:
@@ -272,7 +317,7 @@ class StockMonitorRepository:
     ) -> List[StockMonitorAlert]:
         """List recent alerts with optional filters."""
         with self.db.get_session() as session:
-            cutoff = datetime.now() - timedelta(hours=hours)
+            cutoff = get_now_cn() - timedelta(hours=hours)
             conditions = [StockMonitorAlert.alert_time >= cutoff]
 
             if stock_code:
@@ -300,18 +345,21 @@ class StockMonitorRepository:
         if not alerts:
             return {
                 "total_alerts": 0,
-                "threshold_1pct_count": 0,
-                "threshold_2pct_count": 0,
+                "level1_count": 0,
+                "level2_count": 0,
+                "level3_count": 0,
                 "unique_stocks": 0,
             }
 
-        threshold_1pct_count = sum(1 for a in alerts if a.alert_type == "threshold_1pct")
-        threshold_2pct_count = sum(1 for a in alerts if a.alert_type == "threshold_2pct")
+        level1_count = sum(1 for a in alerts if a.alert_level == 1)
+        level2_count = sum(1 for a in alerts if a.alert_level == 2)
+        level3_count = sum(1 for a in alerts if a.alert_level == 3)
         unique_stocks = len(set(a.stock_code for a in alerts))
 
         return {
             "total_alerts": len(alerts),
-            "threshold_1pct_count": threshold_1pct_count,
-            "threshold_2pct_count": threshold_2pct_count,
+            "level1_count": level1_count,
+            "level2_count": level2_count,
+            "level3_count": level3_count,
             "unique_stocks": unique_stocks,
         }
