@@ -191,4 +191,10 @@ def prepare_webui_frontend_assets() -> bool:
         needs_build,
         artifact_index,
     )
+    
+    # 如果静态文件已存在，跳过 npm 构建
+    if artifact_index.exists():
+        logger.info("前端静态文件已存在，跳过 npm 构建")
+        return True
+    
     return _run_frontend_commands(commands=commands, frontend_dir=frontend_dir)

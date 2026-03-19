@@ -731,6 +731,249 @@ class YfinanceFetcher(BaseFetcher):
             logger.warning(f"[Yfinance] 获取美股 {stock_code} 实时行情失败: {e}，尝试 Stooq 兜底")
             return self._get_us_stock_quote_from_stooq(stock_code)
 
+    def _is_hk_stock(self, stock_code: str) -> bool:
+        """判断代码是否为港股"""
+        code = stock_code.strip().lower()
+        if code.endswith('.hk'):
+            return True
+        if code.startswith('hk') and len(code) > 2:
+            return True
+        return False
+
+    def _convert_hk_code_to_yf(self, stock_code: str) -> str:
+        """将港股代码转换为 yfinance 格式
+
+        Examples:
+            03759.HK -> 3759.HK
+            hk03759 -> 3759.HK
+            700 -> 0700.HK
+        """
+        code = stock_code.strip().lower()
+        if code.endswith('.hk'):
+            code = code[:-3]
+        if code.startswith('hk'):
+            code = code[2:]
+        code = code.lstrip('0') or '0'
+        code = code.zfill(4)
+        return f"{code}.HK"
+
+    def get_hk_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
+        """获取港股实时行情数据（yfinance 兜底）
+
+        Args:
+            stock_code: 港股代码，如 '03759.HK', 'hk03759', '700'
+
+        Returns:
+            UnifiedRealtimeQuote 对象，获取失败返回 None
+        """
+        import yfinance as yf
+
+        if not self._is_hk_stock(stock_code):
+            return None
+
+        try:
+            yf_symbol = self._convert_hk_code_to_yf(stock_code)
+            logger.debug(f"[Yfinance] 获取港股 {yf_symbol} 实时行情")
+
+            ticker = yf.Ticker(yf_symbol)
+
+            # 优先使用 history 方法（更稳定）
+            hist = ticker.history(period='5d')
+            if hist.empty or len(hist) < 1:
+                logger.warning(f"[Yfinance] 无法获取港股 {yf_symbol} 的历史数据")
+                return None
+
+            today = hist.iloc[-1]
+            prev = hist.iloc[-2] if len(hist) > 1 else today
+
+            price = float(today['Close'])
+            prev_close = float(prev['Close'])
+            open_price = float(today['Open'])
+            high = float(today['High'])
+            low = float(today['Low'])
+            volume = int(today['Volume']) if today['Volume'] > 0 else None
+            market_cap = None
+
+            change_amount = None
+            change_pct = None
+            if price is not None and prev_close is not None and prev_close > 0:
+                change_amount = price - prev_close
+                change_pct = (change_amount / prev_close) * 100
+
+            amplitude = None
+            if high is not None and low is not None and prev_close is not None and prev_close > 0:
+                amplitude = ((high - low) / prev_close) * 100
+
+            try:
+                info_name = ticker.info.get('shortName', '') or ticker.info.get('longName', '') or ''
+                name = info_name if is_meaningful_stock_name(info_name, yf_symbol) else STOCK_NAME_MAP.get(yf_symbol, '')
+            except Exception:
+                name = STOCK_NAME_MAP.get(yf_symbol, '')
+
+            quote = UnifiedRealtimeQuote(
+                code=stock_code,
+                name=name,
+                source=RealtimeSource.FALLBACK,
+                price=price,
+                change_pct=round(change_pct, 2) if change_pct is not None else None,
+                change_amount=round(change_amount, 4) if change_amount is not None else None,
+                volume=volume,
+                amount=None,
+                volume_ratio=None,
+                turnover_rate=None,
+                amplitude=round(amplitude, 2) if amplitude is not None else None,
+                open_price=open_price,
+                high=high,
+                low=low,
+                pre_close=prev_close,
+                pe_ratio=None,
+                pb_ratio=None,
+                total_mv=market_cap,
+                circ_mv=None,
+            )
+
+            logger.info(f"[Yfinance] 获取港股 {yf_symbol} 实时行情成功: 价格={price}")
+            return quote
+
+        except Exception as e:
+            logger.warning(f"[Yfinance] 获取港股 {stock_code} 实时行情失败: {e}")
+            # 尝试 Stooq 兜底
+            return self._get_hk_stock_quote_from_stooq(stock_code)
+
+    def _get_hk_stock_quote_from_stooq(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
+        """使用 Stooq 为港股实时行情提供免密钥兜底。
+
+        Stooq 支持港股，格式为 hk03759.hk
+        """
+        code = stock_code.strip().lower()
+        if code.endswith('.hk'):
+            code = code[:-3]
+        if code.startswith('hk'):
+            code = code[2:]
+        code = code.zfill(5)
+        stooq_symbol = f"{code}.hk"
+
+        url = f"https://stooq.com/q/l/?s={stooq_symbol}"
+        request = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; DSA/1.0; +https://github.com/ZhuLinsen/daily_stock_analysis)",
+                "Accept": "text/plain,text/csv,*/*",
+            },
+        )
+
+        try:
+            with urlopen(request, timeout=15) as response:
+                payload = response.read().decode("utf-8", "ignore").strip()
+        except (HTTPError, URLError, TimeoutError) as exc:
+            logger.warning(f"[Stooq] 获取港股 {stock_code} 实时行情失败: {exc}")
+            return None
+
+        if not payload or payload.upper().startswith("NO DATA"):
+            logger.warning(f"[Stooq] 无法获取 {stock_code} 的行情数据")
+            return None
+        try:
+            reader = csv.reader(StringIO(payload))
+            first_row = next(reader, None)
+            if first_row is None:
+                raise ValueError(f"unexpected Stooq payload: {payload}")
+            normalized_first_row = [cell.strip() for cell in first_row]
+            header_tokens = {cell.lower() for cell in normalized_first_row if cell}
+            has_header = 'open' in header_tokens and 'close' in header_tokens
+            row = next(reader, None) if has_header else first_row
+            if row is None:
+                raise ValueError(f"unexpected Stooq payload: {payload}")
+            normalized_row = [cell.strip() for cell in row]
+            while normalized_row and normalized_row[-1] == '':
+                normalized_row.pop()
+            if len(normalized_row) >= 8:
+                open_index, high_index, low_index, price_index, volume_index = 3, 4, 5, 6, 7
+            elif len(normalized_row) >= 7:
+                open_index, high_index, low_index, price_index, volume_index = 2, 3, 4, 5, 6
+            else:
+                raise ValueError(f"unexpected Stooq payload: {payload}")
+            open_price = float(normalized_row[open_index])
+            high = float(normalized_row[high_index])
+            low = float(normalized_row[low_index])
+            price = float(normalized_row[price_index])
+            volume = int(float(normalized_row[volume_index]))
+            prev_close = None
+            history_url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
+            history_request = Request(
+                history_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; DSA/1.0; +https://github.com/ZhuLinsen/daily_stock_analysis)",
+                    "Accept": "text/plain,text/csv,*/*",
+                },
+            )
+            try:
+                with urlopen(history_request, timeout=15) as response:
+                    history_payload = response.read().decode("utf-8", "ignore").strip()
+            except (HTTPError, URLError, TimeoutError) as exc:
+                logger.debug(f"[Stooq] 获取港股 {stock_code} 日线历史失败: {exc}")
+            else:
+                if history_payload and not history_payload.upper().startswith("NO DATA"):
+                    try:
+                        hist_reader = csv.reader(StringIO(history_payload))
+                        hist_header = next(hist_reader, None)
+                        if hist_header:
+                            hist_header_tokens = [cell.strip().lower() for cell in hist_header]
+                            if "close" in hist_header_tokens and "date" in hist_header_tokens:
+                                hist_date_index = hist_header_tokens.index("date")
+                                hist_close_index = hist_header_tokens.index("close")
+                                daily_rows: list[tuple[datetime, float]] = []
+                                for hist_row in hist_reader:
+                                    if not hist_row:
+                                        continue
+                                    date_text = hist_row[hist_date_index].strip() if len(hist_row) > hist_date_index else ""
+                                    close_text = hist_row[hist_close_index].strip() if len(hist_row) > hist_close_index else ""
+                                    if not date_text or not close_text:
+                                        continue
+                                    try:
+                                        dt = datetime.strptime(date_text, "%Y-%m-%d")
+                                        close_val = float(close_text)
+                                    except Exception:
+                                        continue
+                                    daily_rows.append((dt, close_val))
+                                if len(daily_rows) >= 2:
+                                    daily_rows.sort(key=lambda item: item[0])
+                                    prev_close = daily_rows[-2][1]
+                    except Exception:
+                        pass
+            change_amount = None
+            change_pct = None
+            amplitude = None
+            if prev_close is not None and prev_close > 0:
+                change_amount = price - prev_close
+                change_pct = (change_amount / prev_close) * 100
+                amplitude = ((high - low) / prev_close) * 100
+            quote = UnifiedRealtimeQuote(
+                code=stock_code,
+                name=STOCK_NAME_MAP.get(stooq_symbol.upper(), ''),
+                source=RealtimeSource.STOOQ,
+                price=price,
+                change_pct=round(change_pct, 2) if change_pct is not None else None,
+                change_amount=round(change_amount, 4) if change_amount is not None else None,
+                volume=volume,
+                amount=None,
+                volume_ratio=None,
+                turnover_rate=None,
+                amplitude=round(amplitude, 2) if amplitude is not None else None,
+                open_price=open_price,
+                high=high,
+                low=low,
+                pre_close=prev_close,
+                pe_ratio=None,
+                pb_ratio=None,
+                total_mv=None,
+                circ_mv=None,
+            )
+            logger.info(f"[Stooq] 获取港股 {stock_code} 实时行情成功: 价格={price}")
+            return quote
+        except Exception as e:
+            logger.warning(f"[Stooq] 解析港股 {stock_code} 行情数据失败: {e}")
+            return None
+
 
 if __name__ == "__main__":
     # 测试代码

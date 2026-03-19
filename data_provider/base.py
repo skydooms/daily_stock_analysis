@@ -973,24 +973,49 @@ class DataFetcherManager:
             logger.warning(f"[实时行情] 美股 {stock_code} 无可用数据源")
             return None
 
-        # 港股实时行情只走港股专用入口，避免按 A 股 source_priority
-        # 反复触发同一个 ak.stock_hk_spot_em() 接口。
+        # 港股实时行情：优先 EfinanceFetcher，失败后使用 YfinanceFetcher 兜底
         if _is_hk_market(stock_code):
+            quote = None
             for fetcher in self._fetchers:
-                if fetcher.name != "AkshareFetcher":
-                    continue
-                if not hasattr(fetcher, 'get_realtime_quote'):
+                if fetcher.name == "EfinanceFetcher":
+                    if hasattr(fetcher, 'get_hk_realtime_quote'):
+                        try:
+                            quote = fetcher.get_hk_realtime_quote(stock_code)
+                            if quote is not None and quote.has_basic_data():
+                                logger.info(f"[实时行情] 港股 {stock_code} 成功获取 (来源: efinance)")
+                                return quote
+                        except Exception as e:
+                            logger.warning(f"[实时行情] 港股 {stock_code} Efinance 获取失败: {e}")
                     break
-                try:
-                    quote = fetcher.get_realtime_quote(stock_code, source="hk")
-                    if quote is not None and quote.has_basic_data():
-                        logger.info(f"[实时行情] 港股 {stock_code} 成功获取 (来源: akshare_hk)")
-                        return quote
-                except Exception as e:
-                    logger.warning(f"[实时行情] 港股 {stock_code} 获取失败: {e}")
-                break
 
-            logger.warning(f"[实时行情] 港股 {stock_code} 无可用数据源")
+            if quote is None:
+                for fetcher in self._fetchers:
+                    if fetcher.name == "AkshareFetcher":
+                        if hasattr(fetcher, 'get_realtime_quote'):
+                            try:
+                                quote = fetcher.get_realtime_quote(stock_code, source="hk")
+                                if quote is not None and quote.has_basic_data():
+                                    logger.info(f"[实时行情] 港股 {stock_code} 成功获取 (来源: akshare_hk)")
+                                    return quote
+                            except Exception as e:
+                                logger.warning(f"[实时行情] 港股 {stock_code} Akshare 获取失败: {e}")
+                        break
+
+            if quote is None:
+                for fetcher in self._fetchers:
+                    if fetcher.name == "YfinanceFetcher":
+                        if hasattr(fetcher, 'get_hk_realtime_quote'):
+                            try:
+                                quote = fetcher.get_hk_realtime_quote(stock_code)
+                                if quote is not None and quote.has_basic_data():
+                                    logger.info(f"[实时行情] 港股 {stock_code} 成功获取 (来源: yfinance 兜底)")
+                                    return quote
+                            except Exception as e:
+                                logger.warning(f"[实时行情] 港股 {stock_code} Yfinance 兜底失败: {e}")
+                        break
+
+            if quote is None:
+                logger.warning(f"[实时行情] 港股 {stock_code} 无可用数据源")
             return None
         
         # 获取配置的数据源优先级

@@ -539,6 +539,13 @@ class Config:
     portfolio_risk_lookback_days: int = 180
     portfolio_fx_update_enabled: bool = True
 
+    # === 股票监控配置 ===
+    stock_monitor_enabled: bool = False
+    stock_monitor_interval_seconds: int = 60
+    stock_monitor_default_window: int = 10
+    stock_monitor_threshold_1pct: float = 1.0
+    stock_monitor_threshold_2pct: float = 2.0
+
     # Discord 机器人状态
     discord_bot_status: str = "A股智能分析 | /help"
 
@@ -1090,7 +1097,12 @@ class Config:
                 os.getenv('PORTFOLIO_RISK_STOP_LOSS_NEAR_RATIO', '0.8')
             ),
             portfolio_risk_lookback_days=int(os.getenv('PORTFOLIO_RISK_LOOKBACK_DAYS', '180')),
-            portfolio_fx_update_enabled=os.getenv('PORTFOLIO_FX_UPDATE_ENABLED', 'true').lower() == 'true'
+            portfolio_fx_update_enabled=os.getenv('PORTFOLIO_FX_UPDATE_ENABLED', 'true').lower() == 'true',
+            stock_monitor_enabled=os.getenv('STOCK_MONITOR_ENABLED', 'false').lower() == 'true',
+            stock_monitor_interval_seconds=int(os.getenv('STOCK_MONITOR_INTERVAL_SECONDS', '60')),
+            stock_monitor_default_window=int(os.getenv('STOCK_MONITOR_DEFAULT_WINDOW', '10')),
+            stock_monitor_threshold_1pct=float(os.getenv('STOCK_MONITOR_THRESHOLD_1PCT', '1.0')),
+            stock_monitor_threshold_2pct=float(os.getenv('STOCK_MONITOR_THRESHOLD_2PCT', '2.0')),
         )
     
     @classmethod

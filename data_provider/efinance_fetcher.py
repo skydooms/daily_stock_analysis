@@ -703,6 +703,92 @@ class EfinanceFetcher(BaseFetcher):
             circuit_breaker.record_failure(source_key, str(e))
             return None
 
+    def get_hk_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
+        """
+        获取港股实时行情数据
+
+        Args:
+            stock_code: 港股代码，如 '03759', '00700'
+
+        Returns:
+            UnifiedRealtimeQuote 对象，获取失败返回 None
+        """
+        import efinance as ef
+        circuit_breaker = get_realtime_circuit_breaker()
+        source_key = "efinance_hk"
+
+        if not circuit_breaker.is_available(source_key):
+            logger.warning(f"[熔断] 数据源 {source_key} 处于熔断状态，跳过")
+            return None
+
+        code = stock_code.strip().upper()
+        if code.endswith('.HK'):
+            code = code[:-3]
+        if code.startswith('HK'):
+            code = code[2:]
+        code = code.zfill(5)
+
+        try:
+            self._set_random_user_agent()
+            self._enforce_rate_limit()
+
+            logger.info(f"[API调用] ef.stock.get_latest_quote('{code}') 获取港股实时行情...")
+            import time as _time
+            api_start = _time.time()
+
+            df = _ef_call_with_timeout(ef.stock.get_latest_quote, code)
+
+            api_elapsed = _time.time() - api_start
+            logger.info(f"[API返回] 港股 {code} 实时行情成功, 耗时 {api_elapsed:.2f}s")
+            circuit_breaker.record_success(source_key)
+
+            if df is None or df.empty:
+                logger.warning(f"[API返回] 未找到港股 {code} 的实时行情")
+                return None
+
+            row = df.iloc[0]
+
+            name_col = '名称' if '名称' in df.columns else 'name'
+            price_col = '最新价' if '最新价' in df.columns else 'price'
+            pct_col = '涨跌幅' if '涨跌幅' in df.columns else 'pct_chg'
+            chg_col = '涨跌额' if '涨跌额' in df.columns else 'change'
+            vol_col = '成交量' if '成交量' in df.columns else 'volume'
+            amt_col = '成交额' if '成交额' in df.columns else 'amount'
+            turn_col = '换手率' if '换手率' in df.columns else 'turnover_rate'
+            amp_col = '振幅' if '振幅' in df.columns else 'amplitude'
+            high_col = '最高' if '最高' in df.columns else 'high'
+            low_col = '最低' if '最低' in df.columns else 'low'
+            open_col = '今开' if '今开' in df.columns else 'open'
+            pre_col = '昨收' if '昨收' in df.columns else 'pre_close'
+
+            quote = UnifiedRealtimeQuote(
+                code=stock_code,
+                name=str(row.get(name_col, '')),
+                source=RealtimeSource.EFINANCE,
+                price=safe_float(row.get(price_col)),
+                change_pct=safe_float(row.get(pct_col)),
+                change_amount=safe_float(row.get(chg_col)),
+                volume=safe_int(row.get(vol_col)),
+                amount=safe_float(row.get(amt_col)),
+                turnover_rate=safe_float(row.get(turn_col)),
+                amplitude=safe_float(row.get(amp_col)),
+                high=safe_float(row.get(high_col)),
+                low=safe_float(row.get(low_col)),
+                open_price=safe_float(row.get(open_col)),
+                pre_close=safe_float(row.get(pre_col)),
+            )
+
+            logger.info(
+                f"[港股实时行情-efinance] {stock_code} {quote.name}: "
+                f"价格={quote.price}, 涨跌={quote.change_pct}%"
+            )
+            return quote
+
+        except Exception as e:
+            logger.error(f"[API错误] 获取港股 {stock_code} 实时行情(efinance)失败: {e}")
+            circuit_breaker.record_failure(source_key, str(e))
+            return None
+
     def _get_etf_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """
         获取 ETF 实时行情
