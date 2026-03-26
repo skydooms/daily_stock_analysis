@@ -63,6 +63,10 @@ class MonitorResult:
     alert_sent: bool = False
     error: Optional[str] = None
 
+    # Quote timing info
+    quote_time: Optional[datetime] = None
+    latency_seconds: Optional[float] = None
+
 
 class MonitorEngine:
     """
@@ -133,20 +137,30 @@ class MonitorEngine:
 
     def check_all_monitors(self) -> List[MonitorResult]:
         """Check all active monitor configurations."""
+        logger.info(f"[MonitorEngine] Checking all monitors...")
         configs = self.repo.list_active_configs()
         if not configs:
             logger.debug("[MonitorEngine] No active monitors to check")
             return []
 
+        logger.info(f"[MonitorEngine] Found {len(configs)} active monitors")
         results = []
         for config in configs:
             try:
+                logger.debug(f"[MonitorEngine] Checking {config.stock_code}...")
                 result = self.check_single_monitor(config)
                 if result:
                     results.append(result)
+                    logger.info(
+                        f"[MonitorEngine] Checked {result.stock_code}: "
+                        f"price={result.current_price}, "
+                        f"today_change={result.today_change_pct:.2f}%, "
+                        f"window_change={result.window_change_pct:.2f}%"
+                    )
             except Exception as e:
                 logger.error(f"[MonitorEngine] Error checking {config.stock_code}: {e}")
 
+        logger.info(f"[MonitorEngine] Check completed, {len(results)} results")
         return results
 
     def check_single_monitor(self, config: StockMonitorConfig) -> Optional[MonitorResult]:
@@ -162,6 +176,20 @@ class MonitorEngine:
 
         current_price = quote.price
 
+        # Get quote time and calculate latency
+        quote_time = None
+        latency_seconds = None
+        if hasattr(quote, 'quote_time') and quote.quote_time:
+            quote_time = quote.quote_time
+            if quote_time.tzinfo is None:
+                quote_time = quote_time.replace(tzinfo=TZ_CN)
+            latency_seconds = (now - quote_time).total_seconds()
+            latency_str = f"{latency_seconds:.1f}s" if latency_seconds >= 0 else "N/A"
+            logger.info(
+                f"[检查] {stock_code} {stock_name}: "
+                f"行情时间={quote_time.strftime('%H:%M:%S')} CST (延迟: {latency_str})"
+            )
+
         state = self.repo.get_state(config.id)
         if not state:
             logger.warning(f"[MonitorEngine] No state for config {config.id}")
@@ -172,6 +200,8 @@ class MonitorEngine:
             stock_name=stock_name,
             current_price=current_price,
             window_minutes=config.window_minutes,
+            quote_time=quote_time,
+            latency_seconds=latency_seconds,
         )
 
         # Initialize or check today's start price (for level 1 and 2)

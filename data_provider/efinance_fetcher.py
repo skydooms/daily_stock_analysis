@@ -120,18 +120,18 @@ USER_AGENTS = [
 
 
 # 缓存实时行情数据（避免重复请求）
-# TTL 设为 10 分钟 (600秒)：批量分析场景下避免重复拉取
+# TTL 设为 60 秒：监控场景需要及时更新
 _realtime_cache: Dict[str, Any] = {
     'data': None,
     'timestamp': 0,
-    'ttl': 600  # 10分钟缓存有效期
+    'ttl': 60  # 60秒缓存有效期（监控场景）
 }
 
 # ETF 实时行情缓存（与股票分开缓存）
 _etf_realtime_cache: Dict[str, Any] = {
     'data': None,
     'timestamp': 0,
-    'ttl': 600  # 10分钟缓存有效期
+    'ttl': 60  # 60秒缓存有效期（监控场景）
 }
 
 

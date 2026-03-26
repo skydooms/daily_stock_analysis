@@ -35,7 +35,15 @@ TZ_CN = timezone(timedelta(hours=8))
 
 def get_now_cn() -> datetime:
     """Get current time in China timezone (UTC+8)."""
-    return datetime.now(TZ_CN)
+    # SQLite doesn't support timezones, return naive datetime
+    return datetime.now()
+
+
+def to_cn_time(dt: datetime) -> datetime:
+    """Convert datetime to China timezone."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=TZ_CN)
+    return dt.astimezone(TZ_CN)
 
 
 class StockMonitorConfig(Base):

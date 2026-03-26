@@ -9,3 +9,4 @@ bash "${SCRIPT_DIR}/build-backend-macos.sh"
 bash "${SCRIPT_DIR}/build-desktop-macos.sh"
 
 echo "All builds completed."
+

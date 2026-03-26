@@ -21,11 +21,10 @@ logger = logging.getLogger(__name__)
 
 def is_same_day_cn(d1: datetime, d2: datetime) -> bool:
     """Check if two datetimes are the same day in China timezone."""
-    d1_cn = d1.astimezone(TZ_CN) if d1.tzinfo else d1.replace(tzinfo=TZ_CN)
-    d2_cn = d2.astimezone(TZ_CN) if d2.tzinfo else d2.replace(tzinfo=TZ_CN)
-    return (d1_cn.year == d2_cn.year and
-            d1_cn.month == d2_cn.month and
-            d1_cn.day == d2_cn.day)
+    # Both are naive, just compare
+    return (d1.year == d2.year and
+            d1.month == d2.month and
+            d1.day == d2.day)
 
 
 class StockMonitorRepository:
