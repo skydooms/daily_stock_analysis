@@ -14,7 +14,7 @@ Sell strategies for position stocks:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Dict, Optional, List
 import numpy as np
 import pandas as pd
 import logging
@@ -407,6 +407,251 @@ class DailyDrop(SellStrategy):
                 "drop_threshold": self.drop_threshold * 100,
             }
         )
+
+
+class BottomVolumeSell(SellStrategy):
+    """
+    Sell Strategy for Bottom Volume Surge positions
+
+    Exit conditions (priority order):
+    1. Stop-loss: price breaks below recent low * (1 - buffer) -> close 100%
+    2. Take-profit: price reaches cost * (1 + target) -> reduce 50%
+    3. Trailing stop: price drops > trailing_pct from peak since entry -> close 100%
+    """
+
+    name = "bottom_volume_sell"
+    action = "sell"
+
+    def __init__(
+        self,
+        stop_loss_buffer: float = 0.02,
+        take_profit_pct: float = 0.15,
+        trailing_stop_pct: float = 0.08,
+    ):
+        self.stop_loss_buffer = stop_loss_buffer
+        self.take_profit_pct = take_profit_pct
+        self.trailing_stop_pct = trailing_stop_pct
+        self._stop_loss_levels: Dict[str, float] = {}
+        self._peak_prices: Dict[str, float] = {}
+        self._took_profit: Dict[str, bool] = {}
+
+    def set_stop_loss(self, stock_code: str, stop_loss_price: float) -> None:
+        """Set stop-loss level when a BottomVolumeSurge buy signal fires."""
+        self._stop_loss_levels[stock_code] = stop_loss_price
+        self._peak_prices[stock_code] = 0.0
+        self._took_profit[stock_code] = False
+
+    def clear_state(self, stock_code: str) -> None:
+        """Clear state when position is fully closed."""
+        self._stop_loss_levels.pop(stock_code, None)
+        self._peak_prices.pop(stock_code, None)
+        self._took_profit.pop(stock_code, None)
+
+    def check(
+        self,
+        stock_code: str,
+        data: pd.DataFrame,
+        position: dict,
+        **kwargs
+    ) -> Optional[SellSignal]:
+        if data.empty or not position or position.get("shares", 0) <= 0:
+            return None
+
+        current_close = float(data["close"].iloc[-1])
+        current_high = float(data["high"].iloc[-1])
+        cost_price = position.get("cost_price", 0)
+
+        # Update peak price tracking
+        peak = self._peak_prices.get(stock_code, 0.0)
+        if current_high > peak:
+            self._peak_prices[stock_code] = current_high
+            peak = current_high
+
+        # Condition 1: Stop-loss
+        stop_loss = self._stop_loss_levels.get(stock_code)
+        if stop_loss is None:
+            # Fallback: use 20-day low as stop-loss
+            stop_loss = float(np.min(data["low"].values[-20:])) * (1 - self.stop_loss_buffer)
+            self._stop_loss_levels[stock_code] = stop_loss
+
+        if current_close <= stop_loss:
+            self.clear_state(stock_code)
+            return SellSignal(
+                strategy_name=self.name,
+                stock_code=stock_code,
+                signal_type="close",
+                action="sell",
+                price=current_close,
+                shares_pct=1.0,
+                confidence=0.95,
+                reason=f"止损触发: 价格{current_close:.2f} <= 止损位{stop_loss:.2f}",
+                timestamp=datetime.now(),
+                details={"stop_loss_price": stop_loss, "exit_type": "stop_loss"},
+            )
+
+        # Condition 2: Take-profit (only once)
+        if cost_price > 0 and not self._took_profit.get(stock_code, False):
+            target_price = cost_price * (1 + self.take_profit_pct)
+            if current_close >= target_price:
+                self._took_profit[stock_code] = True
+                return SellSignal(
+                    strategy_name=self.name,
+                    stock_code=stock_code,
+                    signal_type="reduce",
+                    action="sell",
+                    price=current_close,
+                    shares_pct=0.50,
+                    confidence=0.8,
+                    reason=f"止盈触发: 价格{current_close:.2f} >= 目标{target_price:.2f} (+{self.take_profit_pct*100:.0f}%)",
+                    timestamp=datetime.now(),
+                    details={"target_price": target_price, "exit_type": "take_profit"},
+                )
+
+        # Condition 3: Trailing stop
+        if peak > 0 and cost_price > 0 and current_close < peak * (1 - self.trailing_stop_pct):
+            self.clear_state(stock_code)
+            return SellSignal(
+                strategy_name=self.name,
+                stock_code=stock_code,
+                signal_type="close",
+                action="sell",
+                price=current_close,
+                shares_pct=1.0,
+                confidence=0.85,
+                reason=f"移动止损: 价格{current_close:.2f}从最高{peak:.2f}回撤{(1-current_close/peak)*100:.1f}%",
+                timestamp=datetime.now(),
+                details={"peak_price": peak, "drawdown_pct": (1 - current_close / peak) * 100, "exit_type": "trailing_stop"},
+            )
+
+        return None
+
+
+class ChanTheorySell(SellStrategy):
+    """
+    Sell Strategy for Chan Theory positions
+
+    Exit priorities:
+    1. Hard stop-loss below fractal low -> close 100%
+    2. Chan Theory sell points (一卖50%/二卖30%/三卖100%)
+    3. Trailing stop from peak -> close 100%
+    """
+
+    name = "chan_theory_sell"
+    action = "sell"
+
+    def __init__(
+        self,
+        min_stroke_bars: int = 4,
+        stop_loss_buffer: float = 0.02,
+        trailing_stop_pct: float = 0.08,
+    ):
+        from src.trading.signals.chan_theory import ChanTheoryAnalyzer
+        self.analyzer = ChanTheoryAnalyzer(min_stroke_bars=min_stroke_bars)
+        self.stop_loss_buffer = stop_loss_buffer
+        self.trailing_stop_pct = trailing_stop_pct
+        self._stop_loss_levels: Dict[str, float] = {}
+        self._peak_prices: Dict[str, float] = {}
+
+    def set_stop_loss(self, stock_code: str, stop_loss_price: float) -> None:
+        self._stop_loss_levels[stock_code] = stop_loss_price
+        self._peak_prices[stock_code] = 0.0
+
+    def clear_state(self, stock_code: str) -> None:
+        self._stop_loss_levels.pop(stock_code, None)
+        self._peak_prices.pop(stock_code, None)
+
+    def check(
+        self,
+        stock_code: str,
+        data: pd.DataFrame,
+        position: dict,
+        **kwargs
+    ) -> Optional[SellSignal]:
+        if data.empty or not position or position.get("shares", 0) <= 0:
+            return None
+
+        current_close = float(data["close"].iloc[-1])
+        current_high = float(data["high"].iloc[-1])
+        cost_price = position.get("cost_price", 0)
+
+        # Update peak tracking
+        peak = self._peak_prices.get(stock_code, 0.0)
+        if current_high > peak:
+            self._peak_prices[stock_code] = current_high
+            peak = current_high
+
+        # Priority 1: Hard stop-loss
+        stop_loss = self._stop_loss_levels.get(stock_code)
+        if stop_loss and current_close <= stop_loss:
+            self.clear_state(stock_code)
+            return SellSignal(
+                strategy_name=self.name,
+                stock_code=stock_code,
+                signal_type="close",
+                action="sell",
+                price=current_close,
+                shares_pct=1.0,
+                confidence=0.95,
+                reason=f"缠论止损: 价格{current_close:.2f} <= 止损位{stop_loss:.2f}",
+                timestamp=datetime.now(),
+                details={"exit_type": "stop_loss", "stop_loss_price": stop_loss},
+            )
+
+        # Priority 2: Chan Theory sell points
+        if len(data) >= 60:
+            result = self.analyzer.analyze(data)
+            if result.sell_points:
+                latest_sp = result.sell_points[-1]
+                sp_bar_index = latest_sp["bar_index"]
+
+                if sp_bar_index >= len(data) - 3:
+                    sp_type = latest_sp["type"]
+                    type_config = {
+                        "first_sell":  {"shares_pct": 0.50, "confidence": 0.90, "label": "一卖"},
+                        "second_sell": {"shares_pct": 0.30, "confidence": 0.75, "label": "二卖"},
+                        "third_sell":  {"shares_pct": 1.00, "confidence": 0.70, "label": "三卖"},
+                    }
+                    config = type_config.get(sp_type, {"shares_pct": 0.30, "confidence": 0.6, "label": sp_type})
+
+                    signal_type = "close" if config["shares_pct"] >= 1.0 else "reduce"
+                    if config["shares_pct"] >= 1.0:
+                        self.clear_state(stock_code)
+
+                    return SellSignal(
+                        strategy_name=self.name,
+                        stock_code=stock_code,
+                        signal_type=signal_type,
+                        action="sell",
+                        price=current_close,
+                        shares_pct=config["shares_pct"],
+                        confidence=config["confidence"],
+                        reason=f"缠论{config['label']}: {latest_sp.get('reason', '')}",
+                        timestamp=datetime.now(),
+                        details={
+                            "sell_point_type": sp_type,
+                            "hub_ZG": latest_sp.get("hub_ZG"),
+                            "hub_ZD": latest_sp.get("hub_ZD"),
+                            "exit_type": "chan_theory",
+                        },
+                    )
+
+        # Priority 3: Trailing stop
+        if peak > 0 and cost_price > 0 and current_close < peak * (1 - self.trailing_stop_pct):
+            self.clear_state(stock_code)
+            return SellSignal(
+                strategy_name=self.name,
+                stock_code=stock_code,
+                signal_type="close",
+                action="sell",
+                price=current_close,
+                shares_pct=1.0,
+                confidence=0.85,
+                reason=f"移动止损: 价格{current_close:.2f}从最高{peak:.2f}回撤{(1-current_close/peak)*100:.1f}%",
+                timestamp=datetime.now(),
+                details={"exit_type": "trailing_stop", "peak_price": peak},
+            )
+
+        return None
 
 
 class SellStrategyManager:

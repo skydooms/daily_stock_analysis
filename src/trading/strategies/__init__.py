@@ -12,6 +12,8 @@ from src.trading.strategies.buy_strategies import (
     VolumePriceBreakout,
     DivergenceBottom,
     DeepPullback,
+    BottomVolumeSurge,
+    ChanTheoryBuy,
 )
 from src.trading.strategies.sell_strategies import (
     SellStrategy,
@@ -21,6 +23,8 @@ from src.trading.strategies.sell_strategies import (
     MonthlySurge,
     DivergenceBottomAdd,
     DailyDrop,
+    BottomVolumeSell,
+    ChanTheorySell,
 )
 
 __all__ = [
@@ -28,6 +32,8 @@ __all__ = [
     "VolumePriceBreakout",
     "DivergenceBottom",
     "DeepPullback",
+    "BottomVolumeSurge",
+    "ChanTheoryBuy",
     "SellStrategy",
     "DivergenceTop",
     "DailySurge",
@@ -35,4 +41,6 @@ __all__ = [
     "MonthlySurge",
     "DivergenceBottomAdd",
     "DailyDrop",
+    "BottomVolumeSell",
+    "ChanTheorySell",
 ]
