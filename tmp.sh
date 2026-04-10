@@ -1,112 +1,32 @@
 IS_SANDBOX=1 claude --dangerously-skip-permissions docker中启动yolo模式
 
 
-
-python main.py                    # 正常运行
-python main.py --debug            # 调试模式
-python main.py --dry-run          # 仅获取数据，不进行 AI 分析
-python main.py --stocks 600519,000001  # 指定分析特定股票
-python main.py --no-notify        # 不发送推送通知
-python main.py --single-notify    # 启用单股推送模式（每分析完一只立即推送）
-python main.py --schedule         # 启用定时任务模式
-python main.py --market-review    # 仅运行大盘复盘
-
 python webui.py
 WEBUI_HOST=0.0.0.0 WEBUI_PORT=8000 python3 webui.py
 python main.py 
 
 配置该工程的相关环境，完成后运行调试python3 main.py --webui --market-review
-
-
 tavily  sky: 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
 
 
-每日复盘和持仓检测：
-    早上8点之后总结：
-            美股几大指数：道指，纳指，涨跌幅靠前的板块和方向
-            A股和港股夜间早间消息：板块的最新消息
-        提示持仓：
-                3个月最低点最高点，收盘的最低最高点，每个点到现在涨跌幅
-                1个月最低点最高点，收盘的最低最高点，每个点到现在涨跌幅
-                提示上述几个最低点，涨幅20%30%40%，股价是多少
-                提示上述日期里今日的几天
-    早上9点20开启之前的
-    中午(12点)：
-            关注检测60，120分钟均线，macd，kdj。顶背离，底背离指数
-    晚上(7点)：
-        关注检测60，120分钟均线，macd，kdj。顶背离，底背离指数
-        持仓检测：60，120分钟均线，macd，kdj。顶背离，底背离指数
-
-每日监控：
-    监控持仓股票
 
 
-回测计划：
-1.认为是买点，然后和1个月，3个月，6个月 的60min，120min，日线，10日线，30日线，60日线，120日线 ，计算涨跌幅
-1.认为是卖点，然后和1个月，3个月，6个月 的60min，120min，日线，10日线，30日线，60日线，120日线 ，计算涨跌幅
-
-比较买点和后续的
-
-优化start_monitoring_03759.py：
-1.该脚本用于启动监控服务
-2.使用argparse，允许用户指定股票代码、监控类型、时间窗口等参数
-3.添加日志记录，记录监控的启动、参数设置和结果
-4.在添加监控之前，先检查是否已经存在相同的监控，如果存在则先删除旧的监控，再添加新的监控，确保监控的唯一性
-5.如果添加的股票代码已经添加到监控列表中，应该提示用户已经存在监控，并显示旧的监控
-
-优化Python脚本start_monitoring_03759.py，使其满足以下详细要求：
-
-1. 功能定位：该脚本用于启动并管理股票市场监控服务，确保监控过程的稳定性和可追溯性。
-
-2. 参数处理：
-   - 使用argparse模块实现命令行参数解析功能
-   - 必须支持用户指定以下参数：
-     * 股票代码（支持单个或多个代码输入）
-     * 监控类型（如价格波动、成交量变化等具体监控指标）
-     * 时间窗口（包括监控频率和持续时长）
-   - 为所有参数提供清晰的帮助信息和合理的默认值
-   - 实现参数验证机制，确保输入参数的有效性和格式正确性
-
-3. 日志系统：
-   - 集成Python logging模块实现全面的日志记录
-   - 日志需包含以下关键信息：
-     * 监控服务启动时间和进程ID
-     * 用户配置的所有参数设置详情
-     * 监控过程中的关键事件（如监控开始、暂停、恢复、结束）
-     * 监控结果数据和异常情况
-   - 日志需同时输出到控制台和文件，文件日志应按日期轮转
-   - 日志级别设置为INFO，确保记录足够详细但不过度冗余
-
-4. 监控唯一性保障：
-   - 实现监控实例唯一性检查机制，在添加新监控前执行以下操作：
-     * 查询当前系统中已存在的监控列表
-     * 基于股票代码和监控类型组合判断是否存在重复监控
-     * 如存在相同监控，先安全终止并清理旧监控实例
-     * 记录旧监控的终止信息和新监控的启动信息
-
-5. 股票代码监控状态检查：
-   - 实现股票代码监控状态查询功能
-   - 当用户尝试添加已存在于监控列表中的股票代码时：
-     * 立即向用户显示明确的提示信息
-     * 展示该股票代码当前的监控详情（包括监控类型、参数设置、启动时间等）
-     * 提供选项让用户选择是终止旧监控并启动新监控，还是保留现有监控
-
-6. 错误处理与用户反馈：
-   - 添加全面的异常处理机制，捕获并处理可能的运行时错误
-   - 为用户提供清晰、友好的操作反馈和错误提示
-   - 确保脚本在遇到错误时能够优雅退出并清理资源
-
-7. 代码质量要求：
-   - 遵循PEP 8编码规范
-   - 添加必要的代码注释和文档字符串
-   - 实现模块化设计，将不同功能拆分为独立函数或类
-   - 确保代码具有良好的可维护性和可扩展性
-
-优化完成后，脚本应能够可靠地管理股票监控服务，提供清晰的用户交互，确保监控实例的唯一性，并通过完善的日志系统提供全面的运行状态记录。
 
 
   python3 start_stock_monitor.py --help       # 查看帮助                                                                                                
-  python3 start_stock_monitor.py --list       # 列出监控                                                                                                
-  python3 start_stock_monitor.py -s 600519    # 添加监控                                                                                                
-  python3 start_stock_monitor.py -s 600519 --remove  # 移除监控                                                                                         
+  python3 start_stock_monitor.py --list --notify-start      # 列出监控                                                                                                
+  python3 start_stock_monitor.py -s 300759    # 添加监控                                                                                                
+  python3 start_stock_monitor.py -s 300759 --remove  # 移除监控                                                                                         
   python3 start_stock_monitor.py -s 600519 --force   # 强制替换  
+
+
+  python3 start_stock_monitor.py -s 300759 03759.HK  --force --notify-start  # 移除监控并发送飞书通知
+
+
+git config --global user.email "sky@example.com"
+git config --global user.name "sky"
+
+# 配置邮箱（必须是你 GitHub 注册的邮箱）
+git config --global user.email "yonggedage@163.com"
+# 配置用户名（你的GitHub用户名/真实名字都可以）
+git config --global user.name "skydooms"

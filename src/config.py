@@ -280,6 +280,7 @@ class Config:
     # === 飞书云文档配置 ===
     feishu_app_id: Optional[str] = None
     feishu_app_secret: Optional[str] = None
+    feishu_chat_id: Optional[str] = None  # 飞书群聊 ID（用于应用机器人发送消息）
     feishu_folder_token: Optional[str] = None  # 目标文件夹 Token
 
     # === 数据源 API Token ===
@@ -495,6 +496,29 @@ class Config:
     market_review_region: str = "cn"
     # 交易日检查：默认启用，非交易日跳过执行；设为 false 或 --force-run 可强制执行（Issue #373）
     trading_day_check_enabled: bool = True
+
+    # === 多时间点监测配置 ===
+    # 晨间复盘模块
+    morning_review_enabled: bool = True
+    morning_review_time: str = "07:00"
+    # 午间监测模块
+    noon_monitor_enabled: bool = True
+    noon_monitor_time: str = "12:00"
+    # 晚间监测模块
+    evening_monitor_enabled: bool = True
+    evening_monitor_time: str = "19:00"
+    # 关注股票列表（午间监测用，逗号分隔）
+    watch_list: List[str] = field(default_factory=list)
+    # 价格区间分析周期（天），默认30天和90天
+    price_range_periods: List[int] = field(default_factory=lambda: [30, 90])
+    # 价格预警阈值（%），默认20%、30%、40%
+    price_warning_levels: List[float] = field(default_factory=lambda: [20.0, 30.0, 40.0])
+    # KDJ参数
+    kdj_n: int = 9
+    kdj_m1: int = 3
+    kdj_m2: int = 3
+    # 背离检测回溯周期
+    divergence_lookback: int = 20
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -886,6 +910,7 @@ class Config:
             stock_list=stock_list,
             feishu_app_id=os.getenv('FEISHU_APP_ID'),
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
+            feishu_chat_id=os.getenv('FEISHU_CHAT_ID'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),
             tushare_token=os.getenv('TUSHARE_TOKEN'),
             litellm_model=litellm_model,
@@ -1032,6 +1057,32 @@ class Config:
                 os.getenv('MARKET_REVIEW_REGION', 'cn')
             ),
             trading_day_check_enabled=os.getenv('TRADING_DAY_CHECK_ENABLED', 'true').lower() != 'false',
+            # 多时间点监测配置
+            morning_review_enabled=os.getenv('MORNING_REVIEW_ENABLED', 'true').lower() == 'true',
+            morning_review_time=os.getenv('MORNING_REVIEW_TIME', '07:00'),
+            noon_monitor_enabled=os.getenv('NOON_MONITOR_ENABLED', 'true').lower() == 'true',
+            noon_monitor_time=os.getenv('NOON_MONITOR_TIME', '12:00'),
+            evening_monitor_enabled=os.getenv('EVENING_MONITOR_ENABLED', 'true').lower() == 'true',
+            evening_monitor_time=os.getenv('EVENING_MONITOR_TIME', '19:00'),
+            watch_list=[
+                c.strip().upper()
+                for c in os.getenv('WATCH_LIST', '').split(',')
+                if c.strip()
+            ] or stock_list,
+            price_range_periods=[
+                int(p.strip())
+                for p in os.getenv('PRICE_RANGE_PERIODS', '30,90').split(',')
+                if p.strip()
+            ],
+            price_warning_levels=[
+                float(l.strip())
+                for l in os.getenv('PRICE_WARNING_LEVELS', '20,30,40').split(',')
+                if l.strip()
+            ],
+            kdj_n=int(os.getenv('KDJ_N', '9')),
+            kdj_m1=int(os.getenv('KDJ_M1', '3')),
+            kdj_m2=int(os.getenv('KDJ_M2', '3')),
+            divergence_lookback=int(os.getenv('DIVERGENCE_LOOKBACK', '20')),
             webui_enabled=os.getenv('WEBUI_ENABLED', 'false').lower() == 'true',
             webui_host=os.getenv('WEBUI_HOST', '127.0.0.1'),
             webui_port=int(os.getenv('WEBUI_PORT', '8000')),

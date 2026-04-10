@@ -210,6 +210,30 @@ def parse_arguments() -> argparse.Namespace:
         help='强制回测（即使已有回测结果也重新计算）'
     )
 
+    parser.add_argument(
+        '--morning-review',
+        action='store_true',
+        help='仅运行晨间复盘（美股市场分析 + 持仓价格区间）'
+    )
+
+    parser.add_argument(
+        '--noon-monitor',
+        action='store_true',
+        help='仅运行午间监测（关注股票技术指标监测）'
+    )
+
+    parser.add_argument(
+        '--evening-monitor',
+        action='store_true',
+        help='仅运行晚间监测（持仓股票深度技术分析）'
+    )
+
+    parser.add_argument(
+        '--multi-schedule',
+        action='store_true',
+        help='启用多时间点调度模式（晨间7:00、午间12:00、晚间19:00）'
+    )
+
     return parser.parse_args()
 
 
@@ -662,7 +686,269 @@ def main() -> int:
             )
             return 0
 
-        # 模式2: 定时任务模式
+        # 模式1.5: 晨间复盘
+        if getattr(args, 'morning_review', False):
+            logger.info("模式: 晨间复盘")
+            from src.services.morning_review import run_morning_review
+            from src.notification import NotificationService
+            
+            notifier = NotificationService()
+            result = run_morning_review(portfolio_codes=stock_codes)
+            
+            if result.report_text:
+                logger.info("晨间复盘报告生成完成")
+                
+                sent = False
+                
+                if not args.no_notify and notifier.is_available():
+                    notifier.send(f"🌅 晨间复盘报告\n\n{result.report_text}")
+                    sent = True
+                
+                feishu_app_id = getattr(config, 'feishu_app_id', None)
+                feishu_app_secret = getattr(config, 'feishu_app_secret', None)
+                feishu_chat_id = getattr(config, 'feishu_chat_id', None)
+                
+                if feishu_app_id and feishu_app_secret and feishu_chat_id and not sent:
+                    try:
+                        from bot.platforms.feishu_stream import FeishuReplyClient, FEISHU_SDK_AVAILABLE
+                        if FEISHU_SDK_AVAILABLE:
+                            logger.info("使用飞书应用机器人发送报告...")
+                            client = FeishuReplyClient(feishu_app_id, feishu_app_secret)
+                            if client._send_interactive_card(
+                                content=f"🌅 晨间复盘报告\n\n{result.report_text}",
+                                chat_id=feishu_chat_id,
+                                receive_id_type="chat_id"
+                            ):
+                                logger.info("飞书应用机器人发送成功")
+                                sent = True
+                            else:
+                                logger.error("飞书应用机器人发送失败")
+                    except Exception as e:
+                        logger.error(f"飞书应用机器人发送异常: {e}")
+                
+                if not sent and not args.no_notify:
+                    logger.warning("未配置有效的通知渠道，报告未发送")
+            return 0
+
+        # 模式1.6: 午间监测
+        if getattr(args, 'noon_monitor', False):
+            logger.info("模式: 午间监测")
+            from src.services.noon_monitor import run_noon_monitor
+            from src.notification import NotificationService
+            
+            notifier = NotificationService()
+            watch_list = stock_codes if stock_codes else config.watch_list
+            result = run_noon_monitor(watch_list=watch_list)
+            
+            if result.report_text:
+                logger.info("午间监测报告生成完成")
+                
+                sent = False
+                
+                if not args.no_notify and notifier.is_available():
+                    notifier.send(f"☀️ 午间监测报告\n\n{result.report_text}")
+                    sent = True
+                
+                feishu_app_id = getattr(config, 'feishu_app_id', None)
+                feishu_app_secret = getattr(config, 'feishu_app_secret', None)
+                feishu_chat_id = getattr(config, 'feishu_chat_id', None)
+                
+                if feishu_app_id and feishu_app_secret and feishu_chat_id and not sent:
+                    try:
+                        from bot.platforms.feishu_stream import FeishuReplyClient, FEISHU_SDK_AVAILABLE
+                        if FEISHU_SDK_AVAILABLE:
+                            logger.info("使用飞书应用机器人发送报告...")
+                            client = FeishuReplyClient(feishu_app_id, feishu_app_secret)
+                            if client._send_interactive_card(
+                                content=f"☀️ 午间监测报告\n\n{result.report_text}",
+                                chat_id=feishu_chat_id,
+                                receive_id_type="chat_id"
+                            ):
+                                logger.info("飞书应用机器人发送成功")
+                                sent = True
+                            else:
+                                logger.error("飞书应用机器人发送失败")
+                    except Exception as e:
+                        logger.error(f"飞书应用机器人发送异常: {e}")
+                
+                if not sent and not args.no_notify:
+                    logger.warning("未配置有效的通知渠道，报告未发送")
+            return 0
+
+        # 模式1.7: 晚间监测
+        if getattr(args, 'evening_monitor', False):
+            logger.info("模式: 晚间监测")
+            from src.services.evening_monitor import run_evening_monitor
+            from src.notification import NotificationService
+            
+            notifier = NotificationService()
+            portfolio_list = stock_codes if stock_codes else config.stock_list
+            result = run_evening_monitor(
+                watch_list=config.watch_list,
+                portfolio_list=portfolio_list,
+            )
+            
+            if result.report_text:
+                logger.info("晚间监测报告生成完成")
+                
+                sent = False
+                
+                if not args.no_notify and notifier.is_available():
+                    notifier.send(f"🌙 晚间监测报告\n\n{result.report_text}")
+                    sent = True
+                
+                feishu_app_id = getattr(config, 'feishu_app_id', None)
+                feishu_app_secret = getattr(config, 'feishu_app_secret', None)
+                feishu_chat_id = getattr(config, 'feishu_chat_id', None)
+                
+                if feishu_app_id and feishu_app_secret and feishu_chat_id and not sent:
+                    try:
+                        from bot.platforms.feishu_stream import FeishuReplyClient, FEISHU_SDK_AVAILABLE
+                        if FEISHU_SDK_AVAILABLE:
+                            logger.info("使用飞书应用机器人发送报告...")
+                            client = FeishuReplyClient(feishu_app_id, feishu_app_secret)
+                            if client._send_interactive_card(
+                                content=f"🌙 晚间监测报告\n\n{result.report_text}",
+                                chat_id=feishu_chat_id,
+                                receive_id_type="chat_id"
+                            ):
+                                logger.info("飞书应用机器人发送成功")
+                                sent = True
+                            else:
+                                logger.error("飞书应用机器人发送失败")
+                    except Exception as e:
+                        logger.error(f"飞书应用机器人发送异常: {e}")
+                
+                if not sent and not args.no_notify:
+                    logger.warning("未配置有效的通知渠道，报告未发送")
+            return 0
+
+        # 模式2: 多时间点调度模式
+        if getattr(args, 'multi_schedule', False):
+            logger.info("模式: 多时间点调度")
+            from src.scheduler_manager import create_scheduler_manager
+            from src.services.morning_review import run_morning_review
+            from src.services.noon_monitor import run_noon_monitor
+            from src.services.evening_monitor import run_evening_monitor
+            from src.notification import NotificationService
+            
+            notifier = NotificationService()
+            
+            def morning_task():
+                logger.info("执行晨间复盘任务...")
+                result = run_morning_review(portfolio_codes=stock_codes)
+                if result.report_text:
+                    sent = False
+                    if notifier.is_available():
+                        notifier.send(f"🌅 晨间复盘报告\n\n{result.report_text}")
+                        sent = True
+                    
+                    feishu_app_id = getattr(config, 'feishu_app_id', None)
+                    feishu_app_secret = getattr(config, 'feishu_app_secret', None)
+                    feishu_chat_id = getattr(config, 'feishu_chat_id', None)
+                    
+                    if feishu_app_id and feishu_app_secret and feishu_chat_id and not sent:
+                        try:
+                            from bot.platforms.feishu_stream import FeishuReplyClient, FEISHU_SDK_AVAILABLE
+                            if FEISHU_SDK_AVAILABLE:
+                                logger.info("使用飞书应用机器人发送报告...")
+                                client = FeishuReplyClient(feishu_app_id, feishu_app_secret)
+                                if client._send_interactive_card(
+                                    content=f"🌅 晨间复盘报告\n\n{result.report_text}",
+                                    chat_id=feishu_chat_id,
+                                    receive_id_type="chat_id"
+                                ):
+                                    logger.info("飞书应用机器人发送成功")
+                                    sent = True
+                                else:
+                                    logger.error("飞书应用机器人发送失败")
+                        except Exception as e:
+                            logger.error(f"飞书应用机器人发送异常: {e}")
+            
+            def noon_task():
+                logger.info("执行午间监测任务...")
+                watch_list = stock_codes if stock_codes else config.watch_list
+                result = run_noon_monitor(watch_list=watch_list)
+                if result.report_text:
+                    sent = False
+                    if notifier.is_available():
+                        notifier.send(f"☀️ 午间监测报告\n\n{result.report_text}")
+                        sent = True
+                    
+                    feishu_app_id = getattr(config, 'feishu_app_id', None)
+                    feishu_app_secret = getattr(config, 'feishu_app_secret', None)
+                    feishu_chat_id = getattr(config, 'feishu_chat_id', None)
+                    
+                    if feishu_app_id and feishu_app_secret and feishu_chat_id and not sent:
+                        try:
+                            from bot.platforms.feishu_stream import FeishuReplyClient, FEISHU_SDK_AVAILABLE
+                            if FEISHU_SDK_AVAILABLE:
+                                logger.info("使用飞书应用机器人发送报告...")
+                                client = FeishuReplyClient(feishu_app_id, feishu_app_secret)
+                                if client._send_interactive_card(
+                                    content=f"☀️ 午间监测报告\n\n{result.report_text}",
+                                    chat_id=feishu_chat_id,
+                                    receive_id_type="chat_id"
+                                ):
+                                    logger.info("飞书应用机器人发送成功")
+                                    sent = True
+                                else:
+                                    logger.error("飞书应用机器人发送失败")
+                        except Exception as e:
+                            logger.error(f"飞书应用机器人发送异常: {e}")
+            
+            def evening_task():
+                logger.info("执行晚间监测任务...")
+                portfolio_list = stock_codes if stock_codes else config.stock_list
+                result = run_evening_monitor(
+                    watch_list=config.watch_list,
+                    portfolio_list=portfolio_list,
+                )
+                if result.report_text:
+                    sent = False
+                    if notifier.is_available():
+                        notifier.send(f"🌙 晚间监测报告\n\n{result.report_text}")
+                        sent = True
+                    
+                    feishu_app_id = getattr(config, 'feishu_app_id', None)
+                    feishu_app_secret = getattr(config, 'feishu_app_secret', None)
+                    feishu_chat_id = getattr(config, 'feishu_chat_id', None)
+                    
+                    if feishu_app_id and feishu_app_secret and feishu_chat_id and not sent:
+                        try:
+                            from bot.platforms.feishu_stream import FeishuReplyClient, FEISHU_SDK_AVAILABLE
+                            if FEISHU_SDK_AVAILABLE:
+                                logger.info("使用飞书应用机器人发送报告...")
+                                client = FeishuReplyClient(feishu_app_id, feishu_app_secret)
+                                if client._send_interactive_card(
+                                    content=f"🌙 晚间监测报告\n\n{result.report_text}",
+                                    chat_id=feishu_chat_id,
+                                    receive_id_type="chat_id"
+                                ):
+                                    logger.info("飞书应用机器人发送成功")
+                                    sent = True
+                                else:
+                                    logger.error("飞书应用机器人发送失败")
+                        except Exception as e:
+                            logger.error(f"飞书应用机器人发送异常: {e}")
+            
+            manager = create_scheduler_manager(
+                morning_func=morning_task,
+                noon_func=noon_task,
+                evening_func=evening_task,
+                config=config,
+            )
+            
+            logger.info("多时间点调度器启动")
+            logger.info("  - 晨间复盘: 07:00")
+            logger.info("  - 午间监测: 12:00")
+            logger.info("  - 晚间监测: 19:00")
+            logger.info("按 Ctrl+C 退出...")
+            
+            manager.run()
+            return 0
+
+        # 模式3: 定时任务模式
         if args.schedule or config.schedule_enabled:
             logger.info("模式: 定时任务")
             logger.info(f"每日执行时间: {config.schedule_time}")
